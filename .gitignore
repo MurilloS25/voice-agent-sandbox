@@ -1,0 +1,30 @@
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# JavaScript / Next.js
+node_modules/
+.next/
+out/
+.turbo/
+coverage/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Tooling and deployment
+.vercel/
+playwright-report/
+test-results/
+.DS_Store
+Thumbs.db
+
+# Local-only Claude settings
+.claude/settings.local.json
