@@ -1,0 +1,64 @@
+@import "tailwindcss";
+
+/*
+ * Palette drawn from the workshop: primer-grey walls, bottle-green paint, celeste frame
+ * enamel, hi-vis tape. Every text/background pair below meets WCAG AA.
+ */
+@theme {
+  --color-primer: #e6e9e5;
+  --color-bottle: #0f3b36;
+  --color-moss: #3f5f5a;
+  --color-celeste: #8fd3ce;
+  --color-hivis: #d7e34a;
+  --color-rust: #a8391f;
+
+  --font-display: var(--font-display-loaded), "Arial Narrow", sans-serif;
+  --font-sans: var(--font-body-loaded), system-ui, sans-serif;
+}
+
+:root {
+  color-scheme: light;
+}
+
+body {
+  background: var(--color-primer);
+  color: var(--color-bottle);
+  font-family: var(--font-sans);
+  font-size: 1.0625rem;
+  line-height: 1.6;
+}
+
+:focus-visible {
+  outline: 3px solid var(--color-bottle);
+  outline-offset: 3px;
+}
+
+.on-dark :focus-visible {
+  outline-color: var(--color-hivis);
+}
+
+/* The one orchestrated moment: the hero wheel turns once on load. */
+@keyframes wheel-turn {
+  from {
+    transform: rotate(-70deg);
+  }
+  to {
+    transform: rotate(0deg);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .wheel-turn {
+    animation: wheel-turn 1.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  .skeleton-pulse {
+    animation: skeleton-pulse 1.4s ease-in-out infinite;
+  }
+}
+
+@keyframes skeleton-pulse {
+  50% {
+    opacity: 0.55;
+  }
+}

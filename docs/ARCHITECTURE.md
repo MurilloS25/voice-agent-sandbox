@@ -31,6 +31,8 @@ The browser sends transcript text to the API. The orchestration layer interprets
 - Start with browser speech capabilities, but isolate them behind an adapter because browser support and quality vary.
 - Use PostgreSQL because appointments, availability, and audit events are relational.
 - Store structured execution events, not chain-of-thought or raw audio.
+- The web app calls the API from Server Components, so the browser never contacts the API directly and no CORS is configured yet. Response types are generated from FastAPI's OpenAPI schema ([ADR 0001](decisions/0001-openapi-as-contract-source.md)).
+- The domain layer (`apps/api/src/voice_agent_api/domain`) has no framework imports and reaches storage only through the `BusinessCatalog` and `AppointmentBook` ports. An in-memory adapter implements them today.
 - Deploy the web interface to Vercel; choose API hosting only after validating streaming and latency requirements.
 
 ## First vertical slice

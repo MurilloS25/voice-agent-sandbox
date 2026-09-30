@@ -4,13 +4,31 @@ Portfolio project exploring how a voice-enabled AI agent can handle realistic bu
 
 ## Status
 
-Development harness ready; implementation has not started.
+Foundation milestone implemented ([plan](docs/plans/0001-project-foundation.md)): a FastAPI backend with deterministic availability for a fictional bicycle workshop, and a Next.js page that shows its services, opening hours, and open appointment times. The page is read-only. The agent, voice, persistence, and appointment changes are not built yet.
 
 ## Start here
 
 - [Architecture](docs/ARCHITECTURE.md)
 - [Development harness](docs/HARNESS.md)
 - [Agent guide](AGENTS.md)
+
+## Local development
+
+Needs Node.js, pnpm, and Python 3.13 with uv (run as `python -m uv`). Full command list in [docs/HARNESS.md](docs/HARNESS.md).
+
+```text
+# Terminal 1: API on http://127.0.0.1:8000
+cd apps/api
+python -m uv sync
+python -m uv run fastapi dev src/voice_agent_api/main.py
+
+# Terminal 2: web on http://localhost:3000
+cd apps/web
+pnpm install
+pnpm dev
+```
+
+The business, services, and seeded bookings are fictional and held in memory. The web app reads the API address from `API_BASE_URL` (default `http://127.0.0.1:8000`).
 
 ## Proposed MVP
 

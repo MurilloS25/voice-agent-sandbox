@@ -1,0 +1,458 @@
+{
+  "components": {
+    "schemas": {
+      "AvailabilityResponse": {
+        "properties": {
+          "date": {
+            "description": "The requested date, interpreted in the business timezone.",
+            "format": "date",
+            "title": "Date",
+            "type": "string"
+          },
+          "service_id": {
+            "title": "Service Id",
+            "type": "string"
+          },
+          "slots": {
+            "items": {
+              "$ref": "#/components/schemas/SlotResponse"
+            },
+            "title": "Slots",
+            "type": "array"
+          },
+          "timezone": {
+            "title": "Timezone",
+            "type": "string"
+          }
+        },
+        "required": [
+          "service_id",
+          "date",
+          "timezone",
+          "slots"
+        ],
+        "title": "AvailabilityResponse",
+        "type": "object"
+      },
+      "BookingWindowResponse": {
+        "properties": {
+          "first_date": {
+            "description": "First bookable date in the business timezone.",
+            "format": "date",
+            "title": "First Date",
+            "type": "string"
+          },
+          "last_date": {
+            "description": "Last bookable date in the business timezone.",
+            "format": "date",
+            "title": "Last Date",
+            "type": "string"
+          }
+        },
+        "required": [
+          "first_date",
+          "last_date"
+        ],
+        "title": "BookingWindowResponse",
+        "type": "object"
+      },
+      "BusinessResponse": {
+        "properties": {
+          "address": {
+            "title": "Address",
+            "type": "string"
+          },
+          "booking_window": {
+            "$ref": "#/components/schemas/BookingWindowResponse"
+          },
+          "currency": {
+            "title": "Currency",
+            "type": "string"
+          },
+          "hours": {
+            "items": {
+              "$ref": "#/components/schemas/OpeningIntervalResponse"
+            },
+            "title": "Hours",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "phone": {
+            "title": "Phone",
+            "type": "string"
+          },
+          "slot_interval_minutes": {
+            "title": "Slot Interval Minutes",
+            "type": "integer"
+          },
+          "tagline": {
+            "title": "Tagline",
+            "type": "string"
+          },
+          "timezone": {
+            "description": "IANA timezone of the business.",
+            "title": "Timezone",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "tagline",
+          "address",
+          "phone",
+          "timezone",
+          "currency",
+          "slot_interval_minutes",
+          "hours",
+          "booking_window"
+        ],
+        "title": "BusinessResponse",
+        "type": "object"
+      },
+      "ErrorBody": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "details": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ErrorFieldDetail"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Details"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "ErrorBody",
+        "type": "object"
+      },
+      "ErrorFieldDetail": {
+        "properties": {
+          "issue": {
+            "description": "Machine-readable validation issue type.",
+            "title": "Issue",
+            "type": "string"
+          },
+          "loc": {
+            "description": "Location of the invalid field.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Loc",
+            "type": "array"
+          }
+        },
+        "required": [
+          "loc",
+          "issue"
+        ],
+        "title": "ErrorFieldDetail",
+        "type": "object"
+      },
+      "ErrorResponse": {
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/ErrorBody"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "title": "ErrorResponse",
+        "type": "object"
+      },
+      "HealthResponse": {
+        "properties": {
+          "status": {
+            "const": "ok",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "HealthResponse",
+        "type": "object"
+      },
+      "MoneyResponse": {
+        "properties": {
+          "amount_minor": {
+            "description": "Amount in the currency's minor unit (e.g. cents).",
+            "title": "Amount Minor",
+            "type": "integer"
+          },
+          "currency": {
+            "description": "ISO 4217 currency code.",
+            "title": "Currency",
+            "type": "string"
+          }
+        },
+        "required": [
+          "amount_minor",
+          "currency"
+        ],
+        "title": "MoneyResponse",
+        "type": "object"
+      },
+      "OpeningIntervalResponse": {
+        "properties": {
+          "end": {
+            "description": "Local closing time, HH:MM.",
+            "pattern": "^\\d{2}:\\d{2}$",
+            "title": "End",
+            "type": "string"
+          },
+          "start": {
+            "description": "Local opening time, HH:MM.",
+            "pattern": "^\\d{2}:\\d{2}$",
+            "title": "Start",
+            "type": "string"
+          },
+          "weekday": {
+            "description": "0 = Monday ... 6 = Sunday.",
+            "maximum": 6.0,
+            "minimum": 0.0,
+            "title": "Weekday",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "weekday",
+          "start",
+          "end"
+        ],
+        "title": "OpeningIntervalResponse",
+        "type": "object"
+      },
+      "ServiceResponse": {
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "duration_minutes": {
+            "title": "Duration Minutes",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "price": {
+            "$ref": "#/components/schemas/MoneyResponse"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "description",
+          "duration_minutes",
+          "price"
+        ],
+        "title": "ServiceResponse",
+        "type": "object"
+      },
+      "ServicesResponse": {
+        "properties": {
+          "services": {
+            "items": {
+              "$ref": "#/components/schemas/ServiceResponse"
+            },
+            "title": "Services",
+            "type": "array"
+          }
+        },
+        "required": [
+          "services"
+        ],
+        "title": "ServicesResponse",
+        "type": "object"
+      },
+      "SlotResponse": {
+        "properties": {
+          "end": {
+            "description": "Slot end, UTC.",
+            "format": "date-time",
+            "title": "End",
+            "type": "string"
+          },
+          "start": {
+            "description": "Slot start, UTC.",
+            "format": "date-time",
+            "title": "Start",
+            "type": "string"
+          }
+        },
+        "required": [
+          "start",
+          "end"
+        ],
+        "title": "SlotResponse",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "Fictional business data and deterministic availability. Demo data only.",
+    "title": "Voice Agent Sandbox API",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health",
+        "tags": [
+          "system"
+        ]
+      }
+    },
+    "/v1/business": {
+      "get": {
+        "operationId": "read_business_v1_business_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BusinessResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Read Business",
+        "tags": [
+          "business"
+        ]
+      }
+    },
+    "/v1/services": {
+      "get": {
+        "operationId": "list_services_v1_services_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServicesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Services",
+        "tags": [
+          "business"
+        ]
+      }
+    },
+    "/v1/services/{service_id}/availability": {
+      "get": {
+        "operationId": "read_availability_v1_services__service_id__availability_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "service_id",
+            "required": true,
+            "schema": {
+              "title": "Service Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Local date in the business timezone (YYYY-MM-DD).",
+            "in": "query",
+            "name": "date",
+            "required": true,
+            "schema": {
+              "description": "Local date in the business timezone (YYYY-MM-DD).",
+              "format": "date",
+              "title": "Date",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AvailabilityResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unknown service."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request or date outside the window."
+          }
+        },
+        "summary": "Read Availability",
+        "tags": [
+          "availability"
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Quillwheel Cycle Works">
+  <rect width="64" height="64" rx="14" fill="#8fd3ce"/>
+  <g fill="none" stroke="#0f3b36" stroke-linecap="round">
+    <circle cx="32" cy="32" r="22" stroke-width="5"/>
+    <g stroke-width="2.5">
+      <path d="M32 10v44M10 32h44M16.4 16.4l31.2 31.2M47.6 16.4L16.4 47.6"/>
+    </g>
+  </g>
+  <circle cx="32" cy="32" r="5" fill="#d7e34a" stroke="#0f3b36" stroke-width="3"/>
+</svg>
