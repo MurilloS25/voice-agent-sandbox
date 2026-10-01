@@ -122,6 +122,11 @@ def test_env_example_holds_placeholders_only() -> None:
         "DB_PORT": "5432",
         "DB_NAME": "postgres",
         "DB_SSLMODE": "verify-full",
+        "AGENT_PROVIDER": "disabled",
+        "AGENT_TEMPERATURE": "0",
+        "AGENT_MAX_OUTPUT_TOKENS": "512",
+        "AGENT_REASONING_EFFORT": "low",
+        "AGENT_REASONING_CONTROL": "include_reasoning",
     }
     for name, value in example.items():
         if name in non_secret_defaults:
@@ -140,3 +145,65 @@ def test_env_example_works_in_memory_mode_but_not_for_postgres() -> None:
         validate_settings(postgres)
     with pytest.raises(ConfigError):
         resolve_signing_key(postgres)
+
+
+def filled_env(tmp_path: Path, extra: str = "") -> Path:
+    env = tmp_path / ".env"
+    devtool.main(["--env-file", str(env), "generate"])
+    text = (
+        env.read_text("utf-8")
+        .replace("DB_HOST=CHANGE_ME", "DB_HOST=db.example.invalid")
+        .replace("voice_agent_api.CHANGE_ME", "voice_agent_api.exampleref")
+        .replace("DB_SSLROOTCERT=CHANGE_ME", "DB_SSLROOTCERT=/certs/ca.pem")
+    )
+    env.write_text(text + extra, encoding="utf-8")
+    return env
+
+
+def test_check_needs_no_provider_setting_while_the_agent_is_disabled(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Placeholders for the provider are fine while it is disabled.
+    env = filled_env(tmp_path, "GROQ_API_KEY=CHANGE_ME\nAGENT_MODEL=CHANGE_ME\n")
+    capsys.readouterr()
+
+    assert devtool.main(["--env-file", str(env), "check"]) == 0
+    out = capsys.readouterr().out
+    assert "AGENT_PROVIDER=disabled" in out and "not required" in out
+    assert "FAIL" not in out
+
+
+def test_check_fails_closed_for_a_selected_provider_without_key_or_model(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], caplog: pytest.LogCaptureFixture
+) -> None:
+    env = filled_env(tmp_path, "AGENT_PROVIDER=groq\n")
+    capsys.readouterr()
+
+    assert devtool.main(["--env-file", str(env), "check"]) == 1
+    # Loading uses the same fail-closed validation: names are logged, nothing else is shown.
+    logged = " ".join(r.getMessage() for r in caplog.records)
+    assert "GROQ_API_KEY" in logged and "AGENT_MODEL" in logged
+    assert "could not be loaded" in capsys.readouterr().out
+
+
+def test_check_passes_a_selected_provider_and_never_prints_the_key(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fake = "fake-offline-credential-for-tests-0001"
+    env = filled_env(
+        tmp_path, f"AGENT_PROVIDER=groq\nGROQ_API_KEY={fake}\nAGENT_MODEL=some/model-id\n"
+    )
+    capsys.readouterr()
+
+    assert devtool.main(["--env-file", str(env), "check"]) == 0
+    out = capsys.readouterr().out
+    assert "ok  : GROQ_API_KEY" in out and "ok  : AGENT_MODEL" in out
+    assert fake not in out and "some/model-id" not in out
+
+
+def test_env_example_with_the_provider_selected_is_rejected_by_name() -> None:
+    settings = load_settings(env_file=str(API_ROOT / ".env.example"))
+    assert settings.agent_provider == "disabled"
+    selected = settings.model_copy(update={"agent_provider": "groq"})
+    with pytest.raises(ConfigError):
+        validate_settings(selected)

@@ -28,9 +28,9 @@ from langgraph.graph.state import CompiledStateGraph
 from pydantic import ValidationError
 
 from voice_agent_api.agent.bounded import BoundedCaller, CallTimedOut, Deadline, DeadlineExceeded
-from voice_agent_api.agent.errors import ProviderError
-from voice_agent_api.agent.events import EventLog, ProviderCode, sanitize_model_text
+from voice_agent_api.agent.events import EventLog, sanitize_model_text
 from voice_agent_api.agent.limits import AgentLimits
+from voice_agent_api.agent.providers import classify_provider_error
 from voice_agent_api.agent.state import AgentState, TurnWorkspace
 from voice_agent_api.agent.tools import (
     TOOLS,
@@ -43,8 +43,6 @@ from voice_agent_api.agent.tools import (
 )
 
 logger = logging.getLogger("voice_agent_api")
-
-_PROVIDER_CODES = {"model_timeout", "model_rate_limited", "model_unavailable", "model_bad_output"}
 
 
 @dataclass(frozen=True)
@@ -60,16 +58,6 @@ class GraphDeps:
     clock: Callable[[], datetime]
 
 
-def classify_provider_error(exc: Exception) -> ProviderCode:
-    """Provider-neutral mapping. Adapters raise `ProviderError`; anything else is judged only by
-    an HTTP-style `status_code` attribute. Exception text is never used."""
-    if isinstance(exc, ProviderError) and exc.code in _PROVIDER_CODES:
-        return exc.code  # type: ignore[return-value]
-    if getattr(exc, "status_code", None) == 429:
-        return "model_rate_limited"
-    return "model_unavailable"
-
-
 def _message_text(message: AIMessage) -> str:
     content = message.content
     if isinstance(content, str):
@@ -80,6 +68,17 @@ def _message_text(message: AIMessage) -> str:
         if isinstance(block, str) or block.get("type") == "text"
     ]
     return "".join(parts)
+
+
+_REASONING_KEYS = frozenset({"reasoning_content", "reasoning"})
+
+
+def _without_reasoning(message: AIMessage) -> AIMessage:
+    """Drop provider reasoning fields, so they are never replayed to the model or shown."""
+    kept = {k: v for k, v in message.additional_kwargs.items() if k not in _REASONING_KEYS}
+    if len(kept) == len(message.additional_kwargs):
+        return message
+    return message.model_copy(update={"additional_kwargs": kept})
 
 
 def _normalize_tool_calls(message: AIMessage, cap: int) -> tuple[AIMessage, bool]:
@@ -143,7 +142,9 @@ def build_graph(deps: GraphDeps) -> CompiledStateGraph[Any, Any, Any, Any]:
         if usage:
             workspace.input_tokens += int(usage.get("input_tokens", 0))
             workspace.output_tokens += int(usage.get("output_tokens", 0))
-        response, truncated = _normalize_tool_calls(response, limits.max_tool_calls)
+        response, truncated = _normalize_tool_calls(
+            _without_reasoning(response), limits.max_tool_calls
+        )
         if truncated:
             events.guardrail("tool_budget_exceeded")
         update["messages"] = [response]

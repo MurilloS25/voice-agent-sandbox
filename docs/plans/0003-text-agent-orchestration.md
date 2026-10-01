@@ -1,6 +1,8 @@
 # Plan 0003 — Text agent orchestration
 
-Status: approved (revision 3). **Phase 3A (provider-free core) is implemented**; 3B (Groq adapter) and 3C (web chat and timeline) are not started. Starting state: commit 253fb59 on main.
+Status: approved (revision 3). **Phase 3A (provider-free core) and the offline part of 3B (Groq adapter) are implemented**; the live part of 3B (key, smoke test, paced evaluation, model choice) and 3C (web chat and timeline) are not started.
+
+Phase 3B (offline) notes: `langchain-groq` 1.1.3 with `groq` 0.37.1 (resolved 2026-10-01). Added `AGENT_PROVIDER` (default `disabled`), `GROQ_API_KEY`, `AGENT_MODEL` (no default, never in code), temperature, output-token, reasoning-effort and reasoning-control settings with conditional fail-closed validation; `agent/providers.py` (factory and `classify_provider_error`, moved out of `graph.py`); wiring in `create_app_from_settings`; reasoning fields dropped in the graph; provider SDK loggers pinned to WARNING because the Groq SDK logs request bodies at DEBUG; `secrets check` output for the provider; placeholder-only `.env.example` entries; ADR 0008 (draft). The adapter sends no retries (`max_retries=0`, `timeout` 8 s). Still deferred: C3 to C5 and the choice of model. Starting state: commit 253fb59 on main.
 
 Phase 3A notes (differences from the text below, and what is deferred):
 

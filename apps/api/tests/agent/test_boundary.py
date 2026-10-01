@@ -22,6 +22,8 @@ FORBIDDEN_MODULES = (
     "aiohttp",
 )
 FORBIDDEN_NAMES = {"confirm_appointment"}
+# The one module that may know a vendor SDK.
+ALLOWED_VENDOR_IMPORTS = {"providers.py": ("langchain_groq",)}
 
 
 def modules_imported(tree: ast.AST) -> list[str]:
@@ -41,7 +43,10 @@ def test_the_agent_package_exists_and_is_scanned() -> None:
 @pytest.mark.parametrize("path", FILES, ids=lambda p: p.name)
 def test_no_forbidden_imports(path: Path) -> None:
     tree = ast.parse(path.read_text(encoding="utf-8"))
+    allowed = ALLOWED_VENDOR_IMPORTS.get(path.name, ())
     for module in modules_imported(tree):
+        if module in allowed:
+            continue
         for forbidden in FORBIDDEN_MODULES:
             assert module != forbidden and not module.startswith(forbidden + "."), (
                 f"{path.name} imports {module}"
@@ -73,3 +78,22 @@ def test_the_agent_package_has_no_async_functions() -> None:
     for path in FILES:
         tree = ast.parse(path.read_text(encoding="utf-8"))
         assert not [n for n in ast.walk(tree) if isinstance(n, ast.AsyncFunctionDef)], path.name
+
+
+def test_only_the_provider_module_imports_the_vendor_and_only_lazily() -> None:
+    importers = []
+    for path in FILES:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        if any(m.startswith("langchain_groq") for m in modules_imported(tree)):
+            importers.append(path.name)
+            for node in tree.body:  # module level only; function bodies are nested
+                if isinstance(node, ast.Import):
+                    names = [alias.name for alias in node.names]
+                elif isinstance(node, ast.ImportFrom):
+                    names = [node.module or ""]
+                else:
+                    continue
+                assert not any(n.startswith("langchain_groq") for n in names), (
+                    "langchain_groq must be imported inside the builder, not at module level"
+                )
+    assert importers == ["providers.py"]

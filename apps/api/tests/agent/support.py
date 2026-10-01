@@ -123,6 +123,7 @@ class AgentWorld:
         store: InMemoryConversationStore | None = None,
         wrap_book: Callable[[InMemoryAppointmentBook], Any] | None = None,
         wrap_catalog: Callable[[Any], Any] | None = None,
+        chat_model: BaseChatModel | None = None,
     ) -> None:
         catalog, self.book = make_world(bookings)
         self.catalog = wrap_catalog(catalog) if wrap_catalog else catalog
@@ -132,7 +133,7 @@ class AgentWorld:
         self.store = store or InMemoryConversationStore(lambda: NOW)
         self.service = AgentService(
             store=self.store,
-            model=self.model,
+            model=chat_model or self.model,
             catalog=self.catalog,
             appointments=self.wrapped_book,
             new_id=id_sequence(),

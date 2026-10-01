@@ -152,3 +152,21 @@ def test_the_app_lifespan_opens_and_closes_the_agent() -> None:
 
     asyncio.run(run())
     assert caller.closed
+
+
+def test_provider_reasoning_is_dropped_and_never_replayed_or_shown() -> None:
+    reasoning = "PRIVATE-REASONING-TEXT-5512"
+    first = AIMessage(
+        content="",
+        tool_calls=[{"name": "list_services", "args": {}, "id": "c1", "type": "tool_call"}],
+        additional_kwargs={"reasoning_content": reasoning, "reasoning": reasoning, "keep": "x"},
+    )
+    final = AIMessage(content="Here you go.", additional_kwargs={"reasoning_content": reasoning})
+    world = AgentWorld([first, final])
+    response = world.send("services?")
+
+    assert response.outcome == "completed"
+    assert reasoning not in response.model_dump_json()
+    replayed = next(m for m in world.model.calls[1] if isinstance(m, AIMessage))
+    assert reasoning not in str(replayed.additional_kwargs)
+    assert replayed.additional_kwargs == {"keep": "x"}

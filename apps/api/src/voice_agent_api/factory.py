@@ -8,7 +8,10 @@ from uuid import UUID, uuid4
 from fastapi import FastAPI
 from starlette.concurrency import run_in_threadpool
 
+from voice_agent_api.agent.limits import AgentLimits
 from voice_agent_api.agent.orchestrator import AgentService
+from voice_agent_api.agent.providers import build_chat_model
+from voice_agent_api.agent.store import InMemoryConversationStore
 from voice_agent_api.api.dependencies import Clock
 from voice_agent_api.api.errors import register_error_handlers
 from voice_agent_api.api.proposal_tokens import ProposalTokenCodec
@@ -89,13 +92,48 @@ def create_app(
     return app
 
 
+def build_agent(
+    settings: Settings, catalog: BusinessCatalog, appointments: AppointmentBook, key: bytes
+) -> AgentService | None:
+    """The agent for the configured provider, or None when it is disabled (the default).
+    Construction makes no network call."""
+    model = build_chat_model(settings)
+    if model is None:
+        return None
+    return AgentService(
+        store=InMemoryConversationStore(system_clock),
+        model=model,
+        catalog=catalog,
+        appointments=appointments,
+        new_id=uuid4,
+        encode=ProposalTokenCodec(key).encode,
+        clock=system_clock,
+        limits=AgentLimits.from_settings(settings),
+    )
+
+
 def create_app_from_settings(settings: Settings) -> FastAPI:
     key = resolve_signing_key(settings)
     if settings.appointment_store == "postgres":
         # Imported here so memory mode and OpenAPI generation never need a database.
         from voice_agent_api.infrastructure.postgres import build_postgres
 
+        # `database` is not opened until the app starts, so a failure while building the agent
+        # (a ConfigError, already ruled out by validation) leaves nothing connected.
         pg_catalog, pg_book, database = build_postgres(settings)
-        return create_app(pg_catalog, pg_book, system_clock, signing_key=key, resources=(database,))
+        return create_app(
+            pg_catalog,
+            pg_book,
+            system_clock,
+            signing_key=key,
+            resources=(database,),
+            agent=build_agent(settings, pg_catalog, pg_book, key),
+        )
     catalog, appointments = build_seed(system_clock(), system_clock)
-    return create_app(catalog, appointments, system_clock, signing_key=key)
+    return create_app(
+        catalog,
+        appointments,
+        system_clock,
+        signing_key=key,
+        agent=build_agent(settings, catalog, appointments, key),
+    )

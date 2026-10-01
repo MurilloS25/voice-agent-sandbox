@@ -109,8 +109,15 @@ def check(path: Path, connect: bool) -> int:
         return 1
     postgres: Settings = settings.model_copy(update={"appointment_store": "postgres"})
     failed = failed_settings(postgres)
-    for name in sorted(set(_SECRET_NAMES) | set(failed)):
+    agent_names = ("GROQ_API_KEY", "AGENT_MODEL")
+    for name in sorted(set(_SECRET_NAMES) | set(failed) - set(agent_names)):
         print(f"{'FAIL' if name in failed else 'ok  '}: {name}")
+    # The provider is optional: nothing is required (and no key is inspected) while it is disabled.
+    if settings.agent_provider == "disabled":
+        print("ok  : AGENT_PROVIDER=disabled (GROQ_API_KEY and AGENT_MODEL not required)")
+    else:
+        for name in agent_names:
+            print(f"{'FAIL' if name in failed else 'ok  '}: {name}")
     if failed:
         return 1
     if not connect:
