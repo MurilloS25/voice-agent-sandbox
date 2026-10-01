@@ -1,6 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { getAvailability, getBusinessOverview } from "./client";
+import {
+  MUTATION_TIMEOUT_MS,
+  READ_TIMEOUT_MS,
+  confirmAppointment,
+  createProposal,
+  getAppointment,
+  getAvailability,
+  getBusinessOverview,
+} from "./client";
 
 const fetchMock = vi.fn();
 
@@ -145,4 +153,173 @@ describe("getAvailability", () => {
     });
     expect(fetchMock).not.toHaveBeenCalled();
   });
+});
+
+describe("createProposal", () => {
+  const START = "2026-10-01T13:00:00Z";
+
+  it("posts the service and start as JSON and saves nothing itself", async () => {
+    fetchMock.mockResolvedValue(json({ proposal_token: "v1.a.b" }));
+
+    const result = await createProposal("flat-repair", START);
+
+    expect(result).toEqual({ kind: "ok", data: { proposal_token: "v1.a.b" } });
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("http://api.test/v1/appointment-proposals");
+    expect(init).toMatchObject({
+      method: "POST",
+      cache: "no-store",
+      headers: expect.objectContaining({ "content-type": "application/json" }),
+    });
+    expect(JSON.parse(init.body)).toEqual({
+      service_id: "flat-repair",
+      start: START,
+    });
+  });
+
+  it.each([
+    [409, "slot_unavailable"],
+    [422, "slot_not_offered"],
+    [404, "service_not_found"],
+  ])("surfaces a %i %s envelope", async (status, code) => {
+    fetchMock.mockResolvedValue(
+      json({ error: { code, message: "Nope." } }, status),
+    );
+    expect(await createProposal("flat-repair", START)).toEqual({
+      kind: "error",
+      status,
+      code,
+      message: "Nope.",
+    });
+  });
+
+  it("reports a storage outage as unavailable", async () => {
+    fetchMock.mockResolvedValue(
+      json({ error: { code: "storage_unavailable", message: "x" } }, 503),
+    );
+    expect(await createProposal("flat-repair", START)).toEqual({
+      kind: "unavailable",
+    });
+  });
+
+  it.each([
+    ["Flat Repair", START],
+    ["../x", START],
+    ["flat-repair", "2026-10-01T13:00:00"],
+    ["flat-repair", "2026-10-01T13:00:00+00:00"],
+    ["flat-repair", "yesterday"],
+  ])("rejects invalid input locally (%s, %s)", async (service, start) => {
+    expect(await createProposal(service, start)).toMatchObject({
+      kind: "error",
+      code: "validation_error",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("confirmAppointment", () => {
+  it("posts the token with an explicit confirm flag and a mutation timeout", async () => {
+    const timeout = vi.spyOn(AbortSignal, "timeout");
+    fetchMock.mockResolvedValue(json({ id: "x" }, 201));
+
+    const result = await confirmAppointment("v1.abc.def");
+
+    expect(result).toEqual({ kind: "ok", data: { id: "x" } });
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("http://api.test/v1/appointments");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body)).toEqual({
+      proposal_token: "v1.abc.def",
+      confirm: true,
+    });
+    expect(timeout).toHaveBeenCalledWith(MUTATION_TIMEOUT_MS);
+    timeout.mockRestore();
+  });
+
+  it("treats a replay (200) like a success", async () => {
+    fetchMock.mockResolvedValue(json({ id: "x" }, 200));
+    expect(await confirmAppointment("v1.abc.def")).toEqual({
+      kind: "ok",
+      data: { id: "x" },
+    });
+  });
+
+  it.each([
+    [409, "slot_unavailable"],
+    [409, "proposal_stale"],
+    [422, "proposal_expired"],
+    [422, "proposal_invalid"],
+  ])("surfaces a %i %s envelope", async (status, code) => {
+    fetchMock.mockResolvedValue(
+      json({ error: { code, message: "Nope." } }, status),
+    );
+    expect(await confirmAppointment("v1.abc.def")).toMatchObject({
+      kind: "error",
+      status,
+      code,
+    });
+  });
+
+  it.each([
+    [
+      "network error",
+      () => fetchMock.mockRejectedValue(new TypeError("fetch failed")),
+    ],
+    [
+      "timeout",
+      () => fetchMock.mockRejectedValue(new DOMException("t", "TimeoutError")),
+    ],
+    ["503", () => fetchMock.mockResolvedValue(json({}, 503))],
+  ])(
+    "reports %s as an unknown outcome (unavailable)",
+    async (_name, arrange) => {
+      arrange();
+      expect(await confirmAppointment("v1.abc.def")).toEqual({
+        kind: "unavailable",
+      });
+    },
+  );
+
+  it.each([
+    "",
+    "garbage",
+    "v1.only-two",
+    "v2.a.b",
+    "v1.a.b c",
+    `v1.a.${"b".repeat(3000)}`,
+  ])("never sends a malformed token (%s)", async (token) => {
+    expect(await confirmAppointment(token)).toMatchObject({
+      kind: "error",
+      code: "proposal_invalid",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("getAppointment", () => {
+  const ID = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d";
+
+  it("reads the appointment by id with the read timeout", async () => {
+    const timeout = vi.spyOn(AbortSignal, "timeout");
+    fetchMock.mockResolvedValue(json({ id: ID }));
+    expect(await getAppointment(ID)).toEqual({ kind: "ok", data: { id: ID } });
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      `http://api.test/v1/appointments/${ID}`,
+    );
+    expect(fetchMock.mock.calls[0][1].method).toBe("GET");
+    expect(timeout).toHaveBeenCalledWith(READ_TIMEOUT_MS);
+    timeout.mockRestore();
+  });
+
+  it.each(["", "not-a-uuid", "../x", `${ID}/extra`, ID.toUpperCase()])(
+    "reports %s as not found without calling the API",
+    async (id) => {
+      expect(await getAppointment(id)).toMatchObject({
+        kind: "error",
+        status: 404,
+        code: "appointment_not_found",
+      });
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
 });

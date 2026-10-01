@@ -1,6 +1,7 @@
 """Exception handlers that turn every failure into the structured error envelope."""
 
 import logging
+from collections.abc import Awaitable, Callable
 from http import HTTPStatus
 
 from fastapi import FastAPI, Request
@@ -9,9 +10,22 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from voice_agent_api.api.schemas import ErrorBody, ErrorFieldDetail, ErrorResponse
-from voice_agent_api.domain.errors import DateOutsideBookingWindow, ServiceNotFound
+from voice_agent_api.domain.errors import (
+    AppointmentNotFound,
+    DateOutsideBookingWindow,
+    DomainError,
+    ProposalExpired,
+    ProposalInvalid,
+    ProposalStale,
+    ServiceNotFound,
+    SlotNotOffered,
+    SlotUnavailable,
+    StorageUnavailable,
+)
 
 logger = logging.getLogger("voice_agent_api")
+
+ExceptionHandler = Callable[[Request, Exception], Awaitable[JSONResponse]]
 
 
 def _envelope(status_code: int, body: ErrorBody) -> JSONResponse:
@@ -29,6 +43,37 @@ async def _service_not_found(_: Request, exc: Exception) -> JSONResponse:
 async def _date_out_of_range(_: Request, exc: Exception) -> JSONResponse:
     assert isinstance(exc, DateOutsideBookingWindow)
     return _envelope(422, ErrorBody(code="date_out_of_range", message=str(exc)))
+
+
+# Domain errors that map to a fixed status and code. Their messages are fixed strings that
+# never carry submitted values, so they are safe to return as-is.
+_DOMAIN_ERRORS: dict[type[DomainError], tuple[int, str]] = {
+    SlotNotOffered: (422, "slot_not_offered"),
+    SlotUnavailable: (409, "slot_unavailable"),
+    ProposalInvalid: (422, "proposal_invalid"),
+    ProposalExpired: (422, "proposal_expired"),
+    ProposalStale: (409, "proposal_stale"),
+    AppointmentNotFound: (404, "appointment_not_found"),
+}
+
+
+def _domain_error_handler(status_code: int, code: str) -> ExceptionHandler:
+    async def handler(request: Request, exc: Exception) -> JSONResponse:
+        assert isinstance(exc, DomainError)
+        # Audit trail: the outcome code and the route template only, never a token, a
+        # submitted id or any other submitted value (the template has `{appointment_id}`,
+        # not the id that was requested).
+        route = getattr(request.scope.get("route"), "path", "-")
+        logger.info("domain_error code=%s method=%s route=%s", code, request.method, route)
+        return _envelope(status_code, ErrorBody(code=code, message=str(exc)))
+
+    return handler
+
+
+async def _storage_unavailable(_: Request, exc: Exception) -> JSONResponse:
+    # No traceback and no detail: the adapter already reduced the failure to a fixed message.
+    assert isinstance(exc, StorageUnavailable)
+    return _envelope(503, ErrorBody(code="storage_unavailable", message=str(exc)))
 
 
 async def _validation_error(_: Request, exc: Exception) -> JSONResponse:
@@ -65,6 +110,9 @@ async def _unhandled(request: Request, exc: Exception) -> JSONResponse:
 def register_error_handlers(app: FastAPI) -> None:
     app.add_exception_handler(ServiceNotFound, _service_not_found)
     app.add_exception_handler(DateOutsideBookingWindow, _date_out_of_range)
+    for error_type, (status_code, code) in _DOMAIN_ERRORS.items():
+        app.add_exception_handler(error_type, _domain_error_handler(status_code, code))
+    app.add_exception_handler(StorageUnavailable, _storage_unavailable)
     app.add_exception_handler(RequestValidationError, _validation_error)
     app.add_exception_handler(StarletteHTTPException, _http_error)
     app.add_exception_handler(Exception, _unhandled)

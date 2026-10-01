@@ -9,14 +9,14 @@ from voice_agent_api.infrastructure.seed import build_seed
 
 
 def test_unknown_service_raises() -> None:
-    catalog, appointments = build_seed(NOW)
+    _catalog, appointments = build_seed(NOW)
     with pytest.raises(ServiceNotFound):
-        get_availability(catalog, appointments, "nope", date(2026, 10, 1), NOW)
+        get_availability(appointments, "nope", date(2026, 10, 1), NOW)
 
 
 def test_seed_bookings_create_gaps_on_the_next_open_day() -> None:
-    catalog, appointments = build_seed(NOW)
-    slots = get_availability(catalog, appointments, "flat-repair", date(2026, 10, 1), NOW)
+    _catalog, appointments = build_seed(NOW)
+    slots = get_availability(appointments, "flat-repair", date(2026, 10, 1), NOW)
     starts = {s.start.astimezone(NEW_YORK).strftime("%H:%M") for s in slots}
     assert "10:00" not in starts  # both benches busy with tune-ups
     assert "11:30" in starts

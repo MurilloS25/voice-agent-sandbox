@@ -29,8 +29,9 @@ export function BusinessHeader({ business }: { business: Business }) {
           </p>
         </address>
         <p className="mt-8 max-w-md text-base">
-          This is a fictional business built for a software demo. The times
-          below are read-only; nothing can be booked here.
+          This is a fictional business built for a software demo. You can pick
+          an open time below and review a booking, but nothing here is real and
+          no personal details are collected.
         </p>
       </div>
     </header>

@@ -1,6 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
+import { expectNoA11yViolations } from "@/test/axe";
 import { availability } from "@/test/fixtures";
 
 import { SlotList } from "./SlotList";
@@ -12,6 +13,7 @@ describe("SlotList", () => {
     render(
       <SlotList
         availability={availability}
+        serviceId="flat-repair"
         serviceName="Flat repair"
         shopClosed={false}
       />,
@@ -19,7 +21,7 @@ describe("SlotList", () => {
 
     const times = screen
       .getAllByRole("listitem")
-      .map((item) => plain(item.textContent));
+      .map((item) => plain(item.querySelector("time")?.textContent ?? null));
     expect(times).toEqual(["9:00 AM", "11:30 AM"]);
     expect(
       screen.getByText(/Eastern Time \(America\/New_York\)/),
@@ -31,22 +33,38 @@ describe("SlotList", () => {
     expect(screen.getByText(/takes 30 minutes/)).toBeInTheDocument();
   });
 
-  it("does not offer booking controls because the experience is read-only", () => {
+  it("links each time to the review step, which saves nothing by itself", () => {
     render(
       <SlotList
         availability={availability}
+        serviceId="flat-repair"
         serviceName="Flat repair"
         shopClosed={false}
       />,
     );
+
+    const links = screen.getAllByRole("link");
+    expect(links).toHaveLength(2);
+    expect(links[0]).toHaveAttribute(
+      "href",
+      "/book?service=flat-repair&start=2026-10-01T13%3A00%3A00Z",
+    );
+    // The accessible name starts with the visible time (WCAG label-in-name) and says what
+    // the link does.
+    expect(links[0]).toHaveAccessibleName(
+      /^9:00 AM, review the booking for Flat repair$/,
+    );
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
-    expect(screen.queryByRole("link")).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/nothing is booked until you confirm/),
+    ).toBeInTheDocument();
   });
 
   it("explains a closed day", () => {
     render(
       <SlotList
         availability={{ ...availability, date: "2026-10-05", slots: [] }}
+        serviceId="flat-repair"
         serviceName="Flat repair"
         shopClosed
       />,
@@ -60,6 +78,7 @@ describe("SlotList", () => {
     render(
       <SlotList
         availability={{ ...availability, slots: [] }}
+        serviceId="flat-repair"
         serviceName="Flat repair"
         shopClosed={false}
       />,
@@ -70,5 +89,17 @@ describe("SlotList", () => {
       ),
     ).toBeInTheDocument();
     expect(screen.queryByText(/closed/i)).not.toBeInTheDocument();
+  });
+
+  it("has no accessibility violations", async () => {
+    const { container } = render(
+      <SlotList
+        availability={availability}
+        serviceId="flat-repair"
+        serviceName="Flat repair"
+        shopClosed={false}
+      />,
+    );
+    await expectNoA11yViolations(container);
   });
 });
