@@ -175,7 +175,7 @@ export function ConfirmForm({
           type="submit"
           disabled={pending}
           aria-busy={pending}
-          className="min-h-12 bg-bottle px-8 py-2 text-lg font-bold text-primer hover:bg-moss disabled:opacity-60"
+          className="min-h-12 max-w-full bg-bottle px-4 py-2 text-lg font-bold text-primer hover:bg-moss disabled:opacity-60 sm:px-8"
         >
           {pending
             ? "Confirming…"
