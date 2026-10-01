@@ -40,7 +40,8 @@ From `apps/api`: `python -m uv run pytest tests/evals`. Offline scenarios run in
 
 ## Live runs
 
-`apps/api/tests/evals/test_live_scenarios.py` reuses `user` from these files (and `before` for scenario 11) against a real provider, once, with per-scenario criteria written in `tests/evals/live_support.py` instead of the scripted `expect`. It is opt-in and paced; see [docs/HARNESS.md](../docs/HARNESS.md). Results are recorded, sanitized, in ADR 0008.
+`apps/api/tests/evals/test_live_scenarios.py` reuses `user` from these files (and `before` for scenario 11) against a real provider, once, with per-scenario criteria written in `tests/evals/live_support.py` instead of the scripted `expect`. It is opt-in and paced; see [docs/HARNESS.md](../docs/HARNESS.md). Results are recorded, sanitized, in ADR 0008. Scenario 4 (open times) must produce no review, and scenario 6 must produce its review only in the turn after the visitor chose a time; any review in a conversation with no earlier successful search fails every scenario (`review_without_prior_offer`).
+
 ### The service and price rule (live scenario 2)
 
 Every service must be stated with its exact price in one **segment**: a table row, a bullet or numbered item, a plain line, or one clause of a sentence that lists several services (cut at a semicolon, a comma or full stop followed by a space, "and" or "but"). A line that names one service stays whole, so any separator between its name and its price is fine (colon, dash, parentheses, comma, spaces in a plain-text table, price first), and Markdown emphasis and curly typography are ignored. A segment that names two different services is ambiguous and proves neither, a segment with an additional or wrong price does not count, and names in one list followed by an unrelated list of prices are never an association. The code and its tests are `price_association_failures` in `apps/api/tests/evals/live_support.py`.
