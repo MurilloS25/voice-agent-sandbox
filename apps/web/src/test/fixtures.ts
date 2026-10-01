@@ -1,4 +1,5 @@
 import type {
+  AgentTurn,
   Appointment,
   AppointmentProposal,
   Availability,
@@ -78,3 +79,105 @@ export const appointment: Appointment = {
   source: "web_demo",
   created_at: "2026-09-30T12:03:00Z",
 };
+
+export const CONVERSATION_ID = "11111111-1111-4111-8111-111111111111";
+
+const at = "2026-09-30T12:00:00Z";
+
+/** A completed assistant turn with the minimal timeline. Override any field. */
+export function agentTurn(
+  turnIndex = 1,
+  overrides: Partial<AgentTurn> = {},
+): AgentTurn {
+  return {
+    conversation_id: CONVERSATION_ID,
+    client_turn_id: `22222222-2222-4222-8222-22222222222${turnIndex}`,
+    turn_index: turnIndex,
+    outcome: "completed",
+    reply: { source: "assistant", text: `Answer ${turnIndex}.` },
+    events: [
+      {
+        seq: 1,
+        at,
+        kind: "user_message",
+        actor: "user",
+        text: `Question ${turnIndex}`,
+      },
+      {
+        seq: 2,
+        at,
+        kind: "assistant_message",
+        actor: "assistant",
+        text: `Answer ${turnIndex}.`,
+      },
+    ],
+    booking_review: null,
+    ...overrides,
+  };
+}
+
+/** A turn that prepared a review, as the API returns it. */
+export function reviewTurn(turnIndex = 1, overrides: Partial<AgentTurn> = {}) {
+  return agentTurn(turnIndex, {
+    reply: {
+      source: "assistant",
+      text: "The review is shown below. Nothing is booked until you confirm.",
+    },
+    booking_review: proposal,
+    events: [
+      {
+        seq: 1,
+        at,
+        kind: "user_message",
+        actor: "user",
+        text: "The first one",
+      },
+      {
+        seq: 2,
+        at,
+        kind: "tool_requested",
+        actor: "assistant",
+        tool: "prepare_booking_review",
+        input: {
+          service_id: null,
+          date: null,
+          days: null,
+          earliest_local_time: null,
+          latest_local_time: null,
+          slot_id: "S1",
+        },
+      },
+      {
+        seq: 3,
+        at,
+        kind: "tool_result",
+        actor: "tool",
+        tool: "prepare_booking_review",
+        status: "ok",
+        duration_ms: 12,
+        summary: "Prepared a review for Flat repair.",
+        code: null,
+      },
+      {
+        seq: 4,
+        at,
+        kind: "booking_review_ready",
+        actor: "tool",
+        service_name: "Flat repair",
+        local_date: "2026-10-01",
+        local_start: "09:00",
+        local_end: "09:30",
+        timezone: "America/New_York",
+        price_display: "15.00 USD",
+      },
+      {
+        seq: 5,
+        at,
+        kind: "assistant_message",
+        actor: "assistant",
+        text: "The review is shown below.",
+      },
+    ],
+    ...overrides,
+  });
+}

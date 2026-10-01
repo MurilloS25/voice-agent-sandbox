@@ -82,3 +82,11 @@ def test_agent_per_call_limits_fit_inside_the_turn_and_the_database_worst_case()
     assert limits.recursion_limit >= 2 * limits.max_model_calls + 2
     assert limits.max_tool_calls <= limits.max_model_calls
     assert limits.max_in_flight_turns <= s.db_pool_max  # agent pressure stays below the pool
+
+
+def test_the_web_client_agent_timeout_matches_the_server_bound_plus_the_margin() -> None:
+    from voice_agent_api.agent.limits import AgentLimits
+
+    limits = AgentLimits.from_settings(Settings(_env_file=None))
+    assert web_timeout_s("AGENT_TURN_TIMEOUT_MS") == limits.web_timeout_s == 26.0
+    assert web_timeout_s("AGENT_TURN_TIMEOUT_MS") > limits.server_bound_s  # strictly greater

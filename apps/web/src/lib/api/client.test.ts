@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { CONVERSATION_ID, agentTurn } from "@/test/fixtures";
+
 import {
+  AGENT_TURN_TIMEOUT_MS,
   MUTATION_TIMEOUT_MS,
   READ_TIMEOUT_MS,
   confirmAppointment,
@@ -8,6 +11,7 @@ import {
   getAppointment,
   getAvailability,
   getBusinessOverview,
+  sendAgentTurn,
 } from "./client";
 
 const fetchMock = vi.fn();
@@ -322,4 +326,151 @@ describe("getAppointment", () => {
       expect(fetchMock).not.toHaveBeenCalled();
     },
   );
+});
+
+describe("sendAgentTurn", () => {
+  const turn = {
+    conversation_id: CONVERSATION_ID,
+    client_turn_id: "22222222-2222-4222-8222-222222222221",
+    turn_index: 1,
+    message: "  What do you do?  ",
+  };
+
+  it("uses the agreed 26 second budget", () => {
+    expect(AGENT_TURN_TIMEOUT_MS).toBe(26000);
+  });
+
+  it("posts the four values with the trimmed message and the turn timeout", async () => {
+    fetchMock.mockResolvedValue(json(agentTurn(1)));
+    const timeout = vi.spyOn(AbortSignal, "timeout");
+
+    const result = await sendAgentTurn(turn);
+
+    expect(result.kind).toBe("ok");
+    expect(timeout).toHaveBeenCalledWith(26000);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("http://api.test/v1/agent/turns");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body as string)).toEqual({
+      ...turn,
+      message: "What do you do?",
+    });
+    timeout.mockRestore();
+  });
+
+  it.each([
+    ["a bad conversation id", { conversation_id: "nope" }],
+    ["a bad turn id", { client_turn_id: "nope" }],
+    ["turn index 0", { turn_index: 0 }],
+    ["turn index 31", { turn_index: 31 }],
+    ["a fractional turn index", { turn_index: 1.5 }],
+    ["an empty message", { message: "   " }],
+    ["a long message", { message: "x".repeat(501) }],
+    ["a control character", { message: "bad\u0000text" }],
+    ["a carriage return", { message: "bad\rtext" }],
+  ])("refuses %s without calling the API", async (_name, patch) => {
+    const result = await sendAgentTurn({ ...turn, ...patch });
+    expect(result).toMatchObject({ kind: "error", code: "validation_error" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("allows a newline inside a message", async () => {
+    fetchMock.mockResolvedValue(json(agentTurn(1)));
+    expect((await sendAgentTurn({ ...turn, message: "a\nb" })).kind).toBe("ok");
+  });
+
+  it("rejects an answer that belongs to a different submission", async () => {
+    for (const other of [
+      agentTurn(2),
+      agentTurn(1, { conversation_id: "33333333-3333-4333-8333-333333333333" }),
+      agentTurn(1, { client_turn_id: "44444444-4444-4444-8444-444444444444" }),
+    ]) {
+      fetchMock.mockResolvedValueOnce(json(other));
+      expect(await sendAgentTurn(turn)).toMatchObject({
+        kind: "error",
+        code: "invalid_response",
+      });
+    }
+  });
+
+  it("rejects an answer without the expected shape", async () => {
+    fetchMock.mockResolvedValue(json({ conversation_id: CONVERSATION_ID }));
+    expect(await sendAgentTurn(turn)).toMatchObject({
+      code: "invalid_response",
+    });
+  });
+
+  it("keeps an agent_unavailable 503 distinct from an unreachable service", async () => {
+    fetchMock.mockResolvedValueOnce(
+      json({ error: { code: "agent_unavailable", message: "m" } }, 503),
+    );
+    expect(await sendAgentTurn(turn)).toMatchObject({
+      kind: "error",
+      status: 503,
+      code: "agent_unavailable",
+    });
+
+    fetchMock.mockResolvedValueOnce(
+      json({ error: { code: "storage_unavailable", message: "m" } }, 503),
+    );
+    expect(await sendAgentTurn(turn)).toEqual({ kind: "unavailable" });
+    fetchMock.mockResolvedValueOnce(new Response("<html>", { status: 502 }));
+    expect(await sendAgentTurn(turn)).toEqual({ kind: "unavailable" });
+  });
+
+  it("reports a network error or timeout as unavailable", async () => {
+    fetchMock.mockRejectedValueOnce(new TypeError("fetch failed"));
+    expect(await sendAgentTurn(turn)).toEqual({ kind: "unavailable" });
+    fetchMock.mockRejectedValueOnce(new DOMException("t", "TimeoutError"));
+    expect(await sendAgentTurn(turn)).toEqual({ kind: "unavailable" });
+  });
+
+  it("surfaces the error code and a valid Retry-After value", async () => {
+    const reply = (retryAfter: string | null) =>
+      new Response(
+        JSON.stringify({ error: { code: "turn_in_progress", message: "m" } }),
+        {
+          status: 409,
+          headers: {
+            "content-type": "application/json",
+            ...(retryAfter ? { "retry-after": retryAfter } : {}),
+          },
+        },
+      );
+    fetchMock.mockResolvedValueOnce(reply("2"));
+    expect(await sendAgentTurn(turn)).toMatchObject({
+      code: "turn_in_progress",
+      retryAfterS: 2,
+    });
+    for (const bad of [null, "0", "-3", "abc", "1.5"]) {
+      fetchMock.mockResolvedValueOnce(reply(bad));
+      const result = await sendAgentTurn(turn);
+      expect(result).toMatchObject({ code: "turn_in_progress" });
+      expect(result).not.toHaveProperty("retryAfterS");
+    }
+  });
+
+  it("clamps a long Retry-After to a minute", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({ error: { code: "agent_busy", message: "m" } }),
+        {
+          status: 429,
+          headers: {
+            "content-type": "application/json",
+            "retry-after": "9999",
+          },
+        },
+      ),
+    );
+    expect(await sendAgentTurn(turn)).toMatchObject({ retryAfterS: 60 });
+  });
+
+  it("does not read the body of a 502 or 504", async () => {
+    const response = new Response("<html>", { status: 504 });
+    const json = vi.spyOn(response, "json");
+    fetchMock.mockResolvedValueOnce(response);
+    expect(await sendAgentTurn(turn)).toEqual({ kind: "unavailable" });
+    expect(json).not.toHaveBeenCalled();
+  });
 });

@@ -5,6 +5,7 @@
  */
 import "server-only";
 
+import { MAX_TURN_INDEX, normalizeMessage } from "../agent-message";
 import type { components } from "./schema";
 
 export type Business = components["schemas"]["BusinessResponse"];
@@ -15,11 +16,21 @@ export type Availability = components["schemas"]["AvailabilityResponse"];
 export type AppointmentProposal =
   components["schemas"]["AppointmentProposalResponse"];
 export type Appointment = components["schemas"]["AppointmentResponse"];
+export type AgentTurnRequest = components["schemas"]["AgentTurnRequest"];
+export type AgentTurn = components["schemas"]["AgentTurnResponse"];
+export type TimelineEvent = AgentTurn["events"][number];
 
 export type ApiResult<T> =
   | { kind: "ok"; data: T }
   | { kind: "unavailable" }
-  | { kind: "error"; status: number; code: string; message: string };
+  | {
+      kind: "error";
+      status: number;
+      code: string;
+      message: string;
+      /** Seconds from a Retry-After header, when the API sent one. */
+      retryAfterS?: number;
+    };
 
 export type BusinessOverview = { business: Business; services: Service[] };
 
@@ -33,6 +44,10 @@ const DEFAULT_BASE_URL = "http://127.0.0.1:8000";
 // Only a dead API reaches them. See docs/decisions/0002-direct-postgres-private-schema.md.
 export const READ_TIMEOUT_MS = 12000;
 export const MUTATION_TIMEOUT_MS = 15000;
+// One agent turn. The API bounds a turn at 21 s (20 s deadline plus 1 s to commit, see
+// apps/api/src/voice_agent_api/agent/limits.py); this adds the same 5 s margin as the booking
+// requests. tests/test_timeout_budget.py in the API fails if the two sides drift apart.
+export const AGENT_TURN_TIMEOUT_MS = 26000;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const INSTANT_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
 const SERVICE_ID_PATTERN = /^[a-z0-9-]+$/;
@@ -45,13 +60,23 @@ function baseUrl(): string {
   return (process.env.API_BASE_URL ?? DEFAULT_BASE_URL).replace(/\/+$/, "");
 }
 
-function errorResult(status: number, payload: unknown): ApiResult<never> {
+function errorResult(
+  status: number,
+  payload: unknown,
+  retryAfterS?: number,
+): ApiResult<never> {
   const body =
     typeof payload === "object" && payload !== null
       ? (payload as { error?: { code?: unknown; message?: unknown } }).error
       : undefined;
   if (typeof body?.code === "string" && typeof body.message === "string") {
-    return { kind: "error", status, code: body.code, message: body.message };
+    return {
+      kind: "error",
+      status,
+      code: body.code,
+      message: body.message,
+      ...(retryAfterS === undefined ? {} : { retryAfterS }),
+    };
   }
   return {
     kind: "error",
@@ -63,6 +88,20 @@ function errorResult(status: number, payload: unknown): ApiResult<never> {
 
 function invalidInput(message: string): ApiResult<never> {
   return { kind: "error", status: 422, code: "validation_error", message };
+}
+
+function isAgentUnavailable(payload: unknown): boolean {
+  const code =
+    typeof payload === "object" && payload !== null
+      ? (payload as { error?: { code?: unknown } }).error?.code
+      : undefined;
+  return code === "agent_unavailable";
+}
+
+function retryAfter(response: Response): number | undefined {
+  const value = Number(response.headers.get("retry-after"));
+  // A pause longer than a minute is clamped: this is a chat, not a queue.
+  return Number.isInteger(value) && value > 0 ? Math.min(value, 60) : undefined;
 }
 
 type RequestOptions = { body?: unknown; timeoutMs?: number };
@@ -90,8 +129,16 @@ async function request<T>(
     return { kind: "unavailable" };
   }
 
-  if ([502, 503, 504].includes(response.status)) {
+  if ([502, 504].includes(response.status)) {
     return { kind: "unavailable" };
+  }
+  if (response.status === 503) {
+    // A 503 that names itself `agent_unavailable` means "no assistant is configured", which is
+    // not the same as the service being down. Any other 503 is an unavailable service.
+    const named = await response.json().catch(() => undefined);
+    return isAgentUnavailable(named)
+      ? errorResult(503, named)
+      : { kind: "unavailable" };
   }
 
   let payload: unknown;
@@ -108,7 +155,7 @@ async function request<T>(
   }
 
   if (!response.ok) {
-    return errorResult(response.status, payload);
+    return errorResult(response.status, payload, retryAfter(response));
   }
   return { kind: "ok", data: payload as T };
 }
@@ -191,4 +238,51 @@ export async function getAppointment(
     };
   }
   return request<Appointment>(`/v1/appointments/${id}`);
+}
+
+const UUID_ANY = UUID_PATTERN;
+
+/**
+ * One conversation turn. Retrying with the very same four values is safe while the API process
+ * still holds the conversation (it replays the stored answer), so callers must never change an
+ * id for a retry.
+ */
+export async function sendAgentTurn(
+  turn: AgentTurnRequest,
+): Promise<ApiResult<AgentTurn>> {
+  const message = normalizeMessage(turn.message);
+  if (
+    !UUID_ANY.test(turn.conversation_id) ||
+    !UUID_ANY.test(turn.client_turn_id) ||
+    !Number.isInteger(turn.turn_index) ||
+    turn.turn_index < 1 ||
+    turn.turn_index > MAX_TURN_INDEX ||
+    message === undefined
+  ) {
+    return invalidInput("Write a message of 1 to 500 characters.");
+  }
+  const result = await request<AgentTurn>("/v1/agent/turns", {
+    body: { ...turn, message },
+    timeoutMs: AGENT_TURN_TIMEOUT_MS,
+  });
+  if (result.kind !== "ok") return result;
+
+  // The answer must belong to this very submission; anything else is not shown.
+  const data = result.data;
+  if (
+    data?.conversation_id !== turn.conversation_id ||
+    data.client_turn_id !== turn.client_turn_id ||
+    data.turn_index !== turn.turn_index ||
+    !Array.isArray(data.events) ||
+    typeof data.reply?.text !== "string"
+  ) {
+    return {
+      kind: "error",
+      status: 200,
+      code: "invalid_response",
+      message:
+        "The schedule service returned a response that could not be read.",
+    };
+  }
+  return result;
 }
