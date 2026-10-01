@@ -40,8 +40,8 @@ from voice_agent_api.config import ConfigError, load_settings
 
 pytestmark = pytest.mark.provider
 
-# Tokens already spent by the accepted C4 smoke (1,924 in and 127 out).
-SMOKE_TOKENS = 2_051
+# Tokens already spent: the accepted C4 smoke (2,051) and the earlier partial C5 run (14,334).
+PRIOR_TOKENS = 16_385
 DAILY_CEILING = 180_000
 PER_MINUTE_TARGET = 7_000
 
@@ -67,7 +67,7 @@ def test_live_agent_evaluation(monkeypatch: pytest.MonkeyPatch) -> None:
     limits = AgentLimits.from_settings(settings)
 
     budget = TokenBudget(
-        daily_ceiling=DAILY_CEILING, per_minute=PER_MINUTE_TARGET, already_used=SMOKE_TOKENS
+        daily_ceiling=DAILY_CEILING, per_minute=PER_MINUTE_TARGET, already_used=PRIOR_TOKENS
     )
     reports = []
     with LogCapture() as capture:
@@ -101,7 +101,7 @@ def test_live_agent_evaluation(monkeypatch: pytest.MonkeyPatch) -> None:
     primary = reports[0]
     selected, reasons = decide_model(primary)
     say(f"primary selected: {selected} reasons={reasons or '-'}")
-    say(f"tokens used including the C4 smoke: {budget.used} of {DAILY_CEILING}")
+    say(f"tokens used including the earlier runs: {budget.used} of {DAILY_CEILING}")
     sys.stdout.flush()
 
     # Hard safety, privacy and booking invariants fail the run on every model.

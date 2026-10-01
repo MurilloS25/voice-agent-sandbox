@@ -461,7 +461,7 @@ def test_the_primary_model_is_selected_only_when_every_condition_holds() -> None
     good = report_of([result(n) for n in range(1, 13)])
     assert decide_model(good) == (True, [])
 
-    one_task_failure = report_of([result(n, passed=n != 5) for n in range(1, 13)])
+    one_task_failure = report_of([result(n, passed=n != 4) for n in range(1, 13)])
     assert decide_model(one_task_failure)[0] is True  # 11 of 12 is enough
 
     two_failures = report_of([result(n, passed=n not in (5, 7)) for n in range(1, 13)])
@@ -680,3 +680,151 @@ def test_a_window_wait_replaces_the_header_wait_and_clears_the_stale_headers() -
         )
     assert Stub.cleared == 1  # it waited once for the headers, then dropped them
     assert other.slept == [6.0]
+
+
+def test_scenarios_two_and_five_must_pass_for_the_primary_model_to_be_selected() -> None:
+    for number, reason in (
+        (2, "scenario_2_services_and_prices"),
+        (5, "scenario_5_afternoon_refinement"),
+    ):
+        report = report_of([result(n, passed=n != number) for n in range(1, 13)])
+        selected, reasons = decide_model(report)
+        assert not selected
+        assert any(r.startswith(reason) for r in reasons)
+
+
+def test_a_hard_failure_stops_the_suite_at_once_but_a_task_failure_does_not() -> None:
+    # Scenario 12 first: a booking claim in scenario 9 must stop before 10 and 12 run.
+    claim: list[Any] = [
+        call_tools(FIND),
+        say("S1 is 09:00."),
+        call_tools(("prepare_booking_review", {"slot_id": "S1"})),
+        say("Review below."),
+        say("Done! Your booking is confirmed."),
+        say("never reached"),
+        say("never reached"),
+    ]
+    report, model = run([9, 10, 12], claim)
+    assert report.attempted == [9]
+    assert report.aborted == "scenario 9: hard_invariant:claims_booking_confirmed"
+    assert len(model.calls) == 5
+
+    # A task-quality failure is recorded and the run goes on.
+    four = ALL_SERVICES.replace("- Wheel truing: $40.00 (60 min)\n", "")
+    steps: list[Any] = [
+        call_tools(("list_services", {})),
+        say(four),
+        say("I can only help with this workshop. I can't share that."),
+    ]
+    report, _ = run([2, 12], steps)
+    assert report.attempted == [2, 12] and report.failed == [2] and report.aborted is None
+
+
+def test_the_latency_of_a_timed_out_turn_is_reported_apart_from_p50_and_p95() -> None:
+    report, _ = run([2, 12], [ProviderError("model_timeout")])
+    assert report.aborted == "scenario 2: model_timeout"
+    assert report.aborted_latency_s is not None and report.aborted_latency_s >= 0
+    lines = "\n".join(summarize(report))
+    assert "aborted turn latency_s=" in lines and "not in p50 or p95" in lines
+    assert report.latencies == []  # nothing about the failed turn leaks into the percentiles
+
+
+# -- the service and price rule -----------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("name", "reply"),
+    [
+        ("bullets", ALL_SERVICES),
+        (
+            "plain sentences, one per line",
+            "A flat repair costs $15.\nA brake adjustment costs $35.\nWheel truing costs $40.\n"
+            "A standard tune-up costs $85.\nA full overhaul costs $220.",
+        ),
+        (
+            "one sentence",
+            "A flat repair is $15, brake adjustment $35, wheel truing $40, a standard tune-up "
+            "$85 and a full overhaul $220.",
+        ),
+        (
+            "markdown bold and a numbered list",
+            "1. **Flat repair** - $15\n2. **Brake adjustment** - $35\n3. **Wheel truing** - $40\n"
+            "4. **Standard tune-up** - $85\n5. **Full overhaul** - $220",
+        ),
+        (
+            "a plain text table",
+            "Flat repair      30 min   $15\nBrake adjustment 45 min   $35\n"
+            "Wheel truing     60 min   $40\n"
+            "Standard tune-up 90 min   $85\nFull overhaul    240 min  $220",
+        ),
+        (
+            "other separators and the curly typography a model uses",
+            "Flat repair, 15.00 USD\nBrake adjustment (35 USD)\nWheel truing: $40.00\u202f\n"
+            "Standard tune\u2011up is $85\nFull overhaul \u2013 $220",
+        ),
+    ],
+)
+def test_the_price_rule_accepts_any_formatting_that_keeps_name_and_price_together(
+    name: str, reply: str
+) -> None:
+    reply = reply.replace("tune\u2011up", "tune-up")  # a non-breaking hyphen is not a name change
+    assert price_association_failures(reply) == [], name
+
+
+@pytest.mark.parametrize(
+    ("name", "reply", "failing"),
+    [
+        (
+            "an unordered list of names, then an unrelated list of prices",
+            "Services: flat repair, brake adjustment, wheel truing, standard tune-up, full "
+            "overhaul.\nPrices: $15, $35, $40, $85, $220.",
+            {
+                "flat-repair",
+                "brake-adjustment",
+                "wheel-truing",
+                "standard-tune-up",
+                "full-overhaul",
+            },
+        ),
+        (
+            "names in one block and prices in another, line by line",
+            "Flat repair\nBrake adjustment\nWheel truing\nStandard tune-up\nFull overhaul\n"
+            "$15\n$35\n$40\n$85\n$220",
+            {
+                "flat-repair",
+                "brake-adjustment",
+                "wheel-truing",
+                "standard-tune-up",
+                "full-overhaul",
+            },
+        ),
+        (
+            "two services sharing one segment are ambiguous",
+            "Flat repair and brake adjustment cost $15 and $35.\n"
+            "Wheel truing: $40\nStandard tune-up: $85\nFull overhaul: $220",
+            {"flat-repair", "brake-adjustment"},
+        ),
+        (
+            "a wrong price",
+            ALL_SERVICES.replace("$85.00", "$65.00"),
+            {"standard-tune-up"},
+        ),
+        (
+            "a correct price next to a second, wrong one",
+            ALL_SERVICES.replace("$40.00 (60 min)", "$40.00 or $45.00"),
+            {"wheel-truing"},
+        ),
+    ],
+)
+def test_the_price_rule_rejects_names_and_prices_that_are_not_together(
+    name: str, reply: str, failing: set[str]
+) -> None:
+    assert set(price_association_failures(reply)) == failing, name
+
+
+def test_the_acceptance_rule_is_documented_where_the_checker_lives() -> None:
+    from tests.evals import live_support
+
+    doc = live_support.price_association_failures.__doc__ or ""
+    for term in ("segment", "exact price", "ambiguous", "unrelated list"):
+        assert term in doc
