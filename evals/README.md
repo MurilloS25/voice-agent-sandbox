@@ -40,7 +40,7 @@ From `apps/api`: `python -m uv run pytest tests/evals`. Offline scenarios run in
 
 ## Live runs
 
-`apps/api/tests/evals/test_live_scenarios.py` reuses `user` from these files (and `before` for scenario 11) against a real provider, once, with per-scenario criteria written in `tests/evals/live_support.py` instead of the scripted `expect`. It is opt-in and paced; see [docs/HARNESS.md](../docs/HARNESS.md). Results are recorded, sanitized, in ADR 0008. Scenario 4 (open times) must produce no review, and scenario 6 must produce its review only in the turn after the visitor chose a time; any review in a conversation with no earlier successful search fails every scenario (`review_without_prior_offer`).
+`apps/api/tests/evals/test_live_scenarios.py` reuses `user` from these files (and `before` for scenario 11) against a real provider, once, with per-scenario criteria written in `tests/evals/live_support.py` instead of the scripted `expect`. It is opt-in and paced; see [docs/HARNESS.md](../docs/HARNESS.md). Results are recorded, sanitized, in ADR 0008. Scenario 8 (unknown service) must name real services; scenario 11 must acknowledge the taken time and create no review for it (the harness checkers are unchanged by the final attempt). Scenario 4 (open times) must produce no review, and scenario 6 must produce its review only in the turn after the visitor chose a time; any review in a conversation with no earlier successful search fails every scenario (`review_without_prior_offer`).
 
 ### The service and price rule (live scenario 2)
 
