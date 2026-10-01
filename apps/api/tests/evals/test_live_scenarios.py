@@ -40,8 +40,9 @@ from voice_agent_api.config import ConfigError, load_settings
 
 pytestmark = pytest.mark.provider
 
-# Tokens already spent: the accepted C4 smoke (2,051) and the earlier partial C5 run (14,334).
-PRIOR_TOKENS = 16_385
+# Tokens already counted: the C4 smoke (2,051), the first partial C5 run (14,334) and the second
+# partial C5 run (16,476, an upper bound that includes an estimate for its failed call).
+PRIOR_TOKENS = 32_861
 DAILY_CEILING = 180_000
 PER_MINUTE_TARGET = 7_000
 
