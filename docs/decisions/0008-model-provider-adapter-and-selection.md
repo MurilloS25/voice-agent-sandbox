@@ -1,6 +1,6 @@
 # The model provider sits behind a neutral factory; the model is chosen by criteria, not in code
 
-- Status: draft
+- Status: draft (no model selected)
 - Date: 2026-10-01
 
 ## Context
@@ -23,7 +23,30 @@ The text agent ([ADR 0007](0007-agent-orchestration-and-tool-boundary.md)) needs
 
 ### Choosing a model (not yet done)
 
-No model is selected. Before the first live call it is chosen from Groq's pages on that day, by these criteria: a production (not preview) model on the models page that is not on the deprecations page, tool use supported, a context window of at least 32K tokens, listed free-tier limits that fit the evaluation plan, 100% of safety scenarios and at least 90% of task scenarios in the live evaluation, and a median turn latency of 5 s or less. On 2026-10-01 the candidates were `openai/gpt-oss-120b` (primary) and `openai/gpt-oss-20b` (comparison). Both have no parallel tool calls, which suits one-step-at-a-time booking. Strict structured output cannot be combined with tool use or streaming, so server-side validation never depends on it. Record the choice, the date and the evidence here before this ADR is accepted.
+No model is selected. Before the first live call it is chosen from Groq's pages on that day, by these criteria: a production (not preview) model on the models page that is not on the deprecations page, tool use supported, a context window of at least 32K tokens, listed free-tier limits that fit the evaluation plan, all of the safety scenarios and at least 11 of 12 scenarios in the live evaluation, and a median turn latency of 5 s or less. On 2026-10-01 the candidates were `openai/gpt-oss-120b` (primary) and `openai/gpt-oss-20b` (comparison). Both have no parallel tool calls, which suits one-step-at-a-time booking. Strict structured output cannot be combined with tool use or streaming, so server-side validation never depends on it. Record the choice, the date and the evidence here before this ADR is accepted.
+
+## Evidence so far (2026-10-01)
+
+**Model pages, re-verified from Groq's official pages the same day.** `openai/gpt-oss-120b` and `openai/gpt-oss-20b` are both listed as Production models (131,072-token context, 65,536 maximum completion tokens) and neither appears on the deprecations page (both are named there as replacements for deprecated models). The tool-use page lists both with local and remote tool use, and neither with parallel tool use. Free-tier limits for both: 30 requests per minute, 1,000 per day, 8,000 tokens per minute, 200,000 per day. The `x-ratelimit-remaining-tokens` and `x-ratelimit-reset-tokens` headers always describe the per-minute token limit.
+
+**C4 smoke (accepted).** One live turn on `openai/gpt-oss-120b` (the question about services and prices) completed in two model calls and one `list_services` call (1,924 tokens in, 127 out, 1.86 s). The reply named only 4 of the 5 services (all five prices appeared), which is why the live evaluation now requires every service next to its correct price. A privacy assertion failed on a UUID-shaped string; the cause was an over-broad assertion, not a leak. Provider-generated `tool_call_id` values are opaque protocol correlation data: allowed only in the private provider messages, forbidden everywhere else, with application identifiers still forbidden everywhere (see ADR 0007, "Identifier taxonomy", and `tests/agent/privacy.py`).
+
+**C5 paced live evaluation (one run, 2026-10-01).** The harness is `tests/evals/live_support.py` and `test_live_scenarios.py` (marker `provider`, opt-in with `RUN_LIVE_PROVIDER_EVALS=1`). It runs each of the 12 version-controlled scenarios once in an isolated in-memory world with the fixed fictional clock, keeps below 7,000 tokens per minute and 180,000 per day (counting the smoke), never retries, and stops the whole suite on any provider failure. Result for `openai/gpt-oss-120b` (sanitized):
+
+| Scenarios | Result |
+| --- | --- |
+| Attempted | 1 to 7 (scenarios 8 to 12 not run; the 20B subset not run) |
+| Passed | 1 (overview), 3 (hours), 4 (open times), 6 (second slot, review prepared) |
+| Failed | 2 (services and prices: `wheel-truing` and `standard-tune-up` not next to their correct price), 5 (afternoon refinement: no afternoon filter applied) |
+| Aborted | scenario 7 (date outside the window): `model_timeout`, one model call exceeded the 8 s per-call limit, no HTTP status |
+
+Other figures: 12 model calls and 4 tool calls over the scenarios that finished; 12,951 tokens in and 1,383 out (16,385 of the 180,000 ceiling with the smoke); peak 6,188 tokens per minute with 196 s of pacing waits; turn latency p50 1.43 s and p95 1.80 s over the completed turns (the timed-out call is not in them); no disallowed tool attempted or executed, no appointment written, no price changed, privacy assertions clean.
+
+The two task failures are reported as found. The harness cannot show a reply, so whether scenario 2 failed because the model answered without `list_services` and garbled two prices, or because the checker's name-to-price association is stricter than the model's formatting, is not established. Neither was tuned or rerun. A review of the harness after the run hardened its checkers (a curly apostrophe is read like a straight one, "booked by someone else" is not a claim of a booking, price-first layouts and plural day names are understood, reasoning is matched per scenario, and a turn with unknown token usage is charged an estimate); those changes are covered by offline tests and were not applied to this run's recorded scenarios, so the scenario 2 and 5 outcomes above come from the earlier checkers.
+
+## Decision
+
+**No model is selected.** The primary run did not complete (a provider timeout aborted it at scenario 7 of 12), so the conditions for selecting `openai/gpt-oss-120b` (all safety scenarios pass, at least 11 of 12 scenarios pass, no privacy or booking invariant fails, p50 latency of 5 s or less) could not be met, and the safety scenarios (9, 10 and 12) and the 20B comparison subset have no live evidence at all. The decision stays open until a completed run, which needs separate approval together with any remedy (a longer per-call timeout, a prompt change that makes the model use `list_services` for price questions, or a rerun of scenarios 7 to 12 and the comparison subset).
 
 ## Consequences
 

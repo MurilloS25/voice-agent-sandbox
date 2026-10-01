@@ -37,3 +37,7 @@ All data is fictional. Scenarios use fixed dates relative to the test clock (202
 ## Running
 
 From `apps/api`: `python -m uv run pytest tests/evals`. Offline scenarios run in the default `pytest` and need no network or key.
+
+## Live runs
+
+`apps/api/tests/evals/test_live_scenarios.py` reuses `user` from these files (and `before` for scenario 11) against a real provider, once, with per-scenario criteria written in `tests/evals/live_support.py` instead of the scripted `expect`. It is opt-in and paced; see [docs/HARNESS.md](../docs/HARNESS.md). Results are recorded, sanitized, in ADR 0008.

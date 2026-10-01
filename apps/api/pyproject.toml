@@ -41,6 +41,7 @@ files = ["src", "tests"]
 testpaths = ["tests"]
 markers = [
     "integration: needs a real PostgreSQL database (apps/api/.env). Run with `-m integration`.",
+    "provider: calls the real model provider (needs RUN_LIVE_PROVIDER_EVALS=1 and a key). Run with `-m provider`.",
 ]
-# Integration tests write to a real database, so they never run unless asked for.
-addopts = '-m "not integration"'
+# Integration and provider tests touch real services, so they never run unless asked for.
+addopts = '-m "not integration and not provider"'

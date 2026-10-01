@@ -31,6 +31,13 @@ The pool's threads are not daemons, so a call still blocked at process exit can 
 
 **Sessions and events** live in memory behind a `ConversationStore` port: 30 minutes idle, at most 200 conversations (the least recently active idle one is evicted; in-flight ones never are; if all are in flight a new one gets 429), 30 turns, 16 history entries, 1,000 tombstones. Cleanup runs under the store lock inside `begin_turn`, with no background task. Eviction and expiry delete cached responses, history, the review summary and index entries together.
 
+**Identifier taxonomy** (corrected after the first live smoke, where a provider-generated, UUID-shaped `tool_call_id` tripped an over-broad "no UUID in provider traffic" assertion). Four surfaces and three kinds of identifier:
+- *Public surfaces*: timeline events, the reply text, logs, URLs and the visible transcript. They hold no identifier of any kind.
+- *The private provider protocol*: the messages sent to the model. A provider-generated `tool_call_id` is **allowed here and only here**, because the next request must pair each tool result with the tool call that asked for it. It is opaque protocol correlation data, may be UUID-shaped, is never stored in a conversation (only text is kept), and is never part of `AgentTurnResponse`.
+- *Application and domain identifiers* (conversation id, client turn id, proposal id, appointment id, bench or database ids) are **forbidden on every surface above**, provider traffic included.
+- The proposal token stays authorized only in `booking_review` and the confirm form's hidden field.
+`tests/agent/privacy.py` encodes this as an audit (`audit()`), used by the offline tests and the live evaluation. It masks only the correlation-id fields of the provider messages, so a UUID-shaped string anywhere else in provider traffic, or a correlation id on a public surface, is still a violation. A violation is reported as a surface and an identifier type (for example `logs:provider_tool_call_id`), never as the matched value.
+
 **Observability.** The timeline holds user text, the assistant's visible text, validated tool inputs, fixed codes, durations and short summaries composed by the code. Model reasoning is never read (only `.content`, with `<think>` blocks stripped) and exception text is never used. The per-turn log line has counts only.
 
 ## Consequences
