@@ -165,11 +165,43 @@ def test_racing_proposals_for_one_slot_create_exactly_one_per_bench(
 
     results = race(lambda i: confirm_appointment(book, proposals[i], TEST_NOW, source=SOURCE))
 
-    created = [r[0] for r in results if isinstance(r, tuple) and r[1]]
-    conflicts = [r for r in results if isinstance(r, SlotUnavailable)]
-    assert len(created) == 2 and len(conflicts) == THREADS - 2
-    assert {a.bench for a in created} == {1, 2}
-    assert count_test_rows(db) == 2
+    # Classify every result. A cold, bounded connection pool means a racing request may
+    # legitimately fail to acquire a connection in time and surface as StorageUnavailable. That
+    # is a safe, retryable 503 that writes nothing. The test still requires the two available
+    # benches to be filled exactly once each and prohibits every unexpected result.
+    created: list[int] = []  # bench numbers of newly created appointments
+    replayed = 0
+    conflicts = 0
+    unavailable = 0
+    unexpected: list[str] = []  # exception class names only, never messages or reprs
+    for result in results:
+        if isinstance(result, tuple) and len(result) == 2:
+            appointment, was_created = result
+            if was_created:
+                created.append(appointment.bench)
+            else:
+                replayed += 1
+        elif isinstance(result, SlotUnavailable):
+            conflicts += 1
+        elif isinstance(result, StorageUnavailable):
+            unavailable += 1
+        else:
+            unexpected.append(type(result).__name__)
+
+    # Plain integers and class names only, so a failing assertion cannot print an appointment,
+    # an identifier, an alias or an exception message.
+    created_count = len(created)
+    persisted = count_test_rows(db)
+    outcomes = (
+        f"created={created_count} replayed={replayed} slot_unavailable={conflicts} "
+        f"storage_unavailable={unavailable} unexpected={sorted(unexpected)}"
+    )
+    assert unexpected == [], outcomes  # includes any DatabaseFault or other exception type
+    assert replayed == 0, outcomes  # every proposal is distinct, so nothing can be a replay
+    assert created_count == 2, outcomes  # exactly the two benches, no more and no fewer
+    assert sorted(created) == [1, 2], outcomes  # distinct benches, exactly {1, 2}
+    assert conflicts + unavailable == THREADS - 2, outcomes  # every other result is controlled
+    assert persisted == created_count == 2, outcomes  # what is stored equals what was created
 
 
 def test_racing_the_same_proposal_creates_one_row_and_replays_the_rest(
@@ -180,11 +212,31 @@ def test_racing_the_same_proposal_creates_one_row_and_replays_the_rest(
 
     results = race(lambda _: confirm_appointment(book, proposal, TEST_NOW, source=SOURCE))
 
-    pairs = [r for r in results if isinstance(r, tuple)]
-    assert len(pairs) == THREADS, results
-    assert sum(1 for _, created in pairs if created) == 1
-    assert len({a.id for a, _ in pairs}) == 1
-    assert count_test_rows(db) == 1
+    # Reduce everything to integers and exception class names before asserting, so a failure can
+    # never print an appointment, an identifier, an alias or an exception message.
+    pairs = 0
+    created = 0
+    appointment_ids = set()
+    unexpected: list[str] = []  # exception class names only, never messages or reprs
+    for result in results:
+        if isinstance(result, tuple) and len(result) == 2:
+            appointment, was_created = result
+            pairs += 1
+            created += 1 if was_created else 0
+            appointment_ids.add(appointment.id)
+        else:
+            unexpected.append(type(result).__name__)
+    distinct_appointments = len(appointment_ids)
+    rows = count_test_rows(db)
+    summary = (
+        f"pairs={pairs} created={created} distinct_appointments={distinct_appointments} "
+        f"rows={rows} unexpected={sorted(unexpected)}"
+    )
+    assert pairs == THREADS, summary  # every thread returned a (appointment, created) result
+    assert unexpected == [], summary  # no exception of any kind
+    assert created == 1, summary  # exactly one thread created the appointment
+    assert distinct_appointments == 1, summary  # all eight results are the same appointment
+    assert rows == 1, summary  # exactly one source='test' row is stored
 
 
 def test_the_exclusion_constraint_rejects_a_raw_overlapping_insert(db: PostgresDatabase) -> None:
