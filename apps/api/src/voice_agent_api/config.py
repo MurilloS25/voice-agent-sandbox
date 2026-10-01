@@ -58,6 +58,11 @@ class Settings(BaseSettings):
     db_lock_timeout_ms: int = Field(1000, ge=100, le=30000)
     db_idle_in_transaction_timeout_ms: int = Field(5000, ge=100, le=60000)
 
+    # Agent turn budget (plan 0003). The defaults are pinned by tests/test_timeout_budget.py.
+    agent_turn_deadline_s: float = Field(20.0, gt=1, le=60)
+    agent_model_timeout_s: float = Field(8.0, gt=0, le=60)
+    agent_tool_timeout_s: float = Field(7.5, gt=0, le=60)
+
 
 def decode_signing_key(value: str) -> bytes:
     """Decode a base64url key and reject weak ones. Raises ValueError (never shown to users)."""

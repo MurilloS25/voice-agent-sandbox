@@ -1,0 +1,20 @@
+{
+  "id": "02-services-and-prices",
+  "category": "task",
+  "description": "A visitor asks which services exist and what they cost.",
+  "turns": [
+    {
+      "user": "Which services do you offer and how much are they?",
+      "script": [
+        { "tool_calls": [{ "name": "list_services", "args": {} }] },
+        { "text": "Flat repair is 15.00 USD and a standard tune-up is 85.00 USD." }
+      ],
+      "expect": {
+        "outcome": "completed",
+        "tools_called_in_order": ["list_services"],
+        "review_ready": false,
+        "reply_should_mention_any": ["15.00", "USD"]
+      }
+    }
+  ]
+}

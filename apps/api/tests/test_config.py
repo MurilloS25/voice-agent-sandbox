@@ -26,6 +26,9 @@ ENV_NAMES = [
     *(f"DB_{n}" for n in ("HOST", "PORT", "NAME", "USER", "PASSWORD", "SSLMODE", "SSLROOTCERT")),
     "DB_ALLOW_REQUIRE_SSLMODE",
     "DB_POOL_MAX",
+    "AGENT_TURN_DEADLINE_S",
+    "AGENT_MODEL_TIMEOUT_S",
+    "AGENT_TOOL_TIMEOUT_S",
 ]
 
 
@@ -154,3 +157,40 @@ def test_the_env_file_variable_can_disable_the_file(
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("VOICE_AGENT_ENV_FILE", "")
     assert load_settings().appointment_store == "memory"
+
+
+def test_agent_budget_defaults_and_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = Settings(_env_file=None)
+    assert (
+        settings.agent_turn_deadline_s,
+        settings.agent_model_timeout_s,
+        settings.agent_tool_timeout_s,
+    ) == (20.0, 8.0, 7.5)
+
+    monkeypatch.setenv("AGENT_TURN_DEADLINE_S", "12")
+    assert Settings(_env_file=None).agent_turn_deadline_s == 12.0
+    monkeypatch.delenv("AGENT_TURN_DEADLINE_S")
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("AGENT_TURN_DEADLINE_S", "0.5"),
+        ("AGENT_TURN_DEADLINE_S", "600"),
+        ("AGENT_MODEL_TIMEOUT_S", "0"),
+        ("AGENT_TOOL_TIMEOUT_S", "-1"),
+    ],
+)
+def test_agent_budget_out_of_range_is_a_generic_config_error(
+    monkeypatch: pytest.MonkeyPatch, name: str, value: str
+) -> None:
+    monkeypatch.setenv(name, value)
+    with pytest.raises(ConfigError) as caught:
+        load_settings(env_file="")
+    assert str(caught.value) == GENERIC
+    assert value not in str(caught.value)
+
+
+def test_the_agent_needs_no_secret_or_provider_setting_in_this_phase() -> None:
+    # Memory mode with no .env still validates: the agent stays disabled (no provider).
+    validate_settings(Settings(_env_file=None))

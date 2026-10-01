@@ -1,0 +1,25 @@
+{
+  "id": "07-date-outside-window",
+  "category": "recovery",
+  "description": "A date beyond the booking window is rejected by the tool and explained.",
+  "turns": [
+    {
+      "user": "Do you have a flat repair slot on January 5, 2027?",
+      "script": [
+        {
+          "tool_calls": [
+            { "name": "find_available_slots", "args": { "service_id": "flat-repair", "date": "2027-01-05" } }
+          ]
+        },
+        { "text": "That date is outside the booking window, which ends on 2026-10-14." }
+      ],
+      "expect": {
+        "outcome": "completed",
+        "tools_called_in_order": ["find_available_slots"],
+        "tool_result_codes": ["date_out_of_range"],
+        "review_ready": false,
+        "reply_should_mention_any": ["window", "2026-10-14"]
+      }
+    }
+  ]
+}

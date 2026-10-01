@@ -9,6 +9,17 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from voice_agent_api.agent.errors import (
+    AgentBusy,
+    AgentUnavailable,
+    ConversationBusy,
+    ConversationExpired,
+    ConversationLimitReached,
+    ConversationNotFound,
+    IdempotencyKeyReused,
+    TurnInProgress,
+    TurnOutOfOrder,
+)
 from voice_agent_api.api.schemas import ErrorBody, ErrorFieldDetail, ErrorResponse
 from voice_agent_api.domain.errors import (
     AppointmentNotFound,
@@ -28,10 +39,13 @@ logger = logging.getLogger("voice_agent_api")
 ExceptionHandler = Callable[[Request, Exception], Awaitable[JSONResponse]]
 
 
-def _envelope(status_code: int, body: ErrorBody) -> JSONResponse:
+def _envelope(
+    status_code: int, body: ErrorBody, headers: dict[str, str] | None = None
+) -> JSONResponse:
     return JSONResponse(
         status_code=status_code,
         content=ErrorResponse(error=body).model_dump(mode="json", exclude_none=True),
+        headers=headers,
     )
 
 
@@ -54,6 +68,15 @@ _DOMAIN_ERRORS: dict[type[DomainError], tuple[int, str]] = {
     ProposalExpired: (422, "proposal_expired"),
     ProposalStale: (409, "proposal_stale"),
     AppointmentNotFound: (404, "appointment_not_found"),
+    AgentUnavailable: (503, "agent_unavailable"),
+    ConversationNotFound: (404, "conversation_not_found"),
+    ConversationExpired: (410, "conversation_expired"),
+    IdempotencyKeyReused: (409, "idempotency_key_reused"),
+    TurnInProgress: (409, "turn_in_progress"),
+    ConversationBusy: (409, "conversation_busy"),
+    TurnOutOfOrder: (409, "turn_out_of_order"),
+    ConversationLimitReached: (409, "conversation_limit_reached"),
+    AgentBusy: (429, "agent_busy"),
 }
 
 
@@ -65,7 +88,9 @@ def _domain_error_handler(status_code: int, code: str) -> ExceptionHandler:
         # not the id that was requested).
         route = getattr(request.scope.get("route"), "path", "-")
         logger.info("domain_error code=%s method=%s route=%s", code, request.method, route)
-        return _envelope(status_code, ErrorBody(code=code, message=str(exc)))
+        retry_after = getattr(exc, "retry_after_s", None)
+        headers = {"Retry-After": str(retry_after)} if retry_after is not None else None
+        return _envelope(status_code, ErrorBody(code=code, message=str(exc)), headers)
 
     return handler
 

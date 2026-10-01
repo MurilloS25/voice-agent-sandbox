@@ -47,6 +47,10 @@ Web, run from `apps/web` (copy `.env.example` to `.env.local` only if the API is
 | Test | `pnpm test` |
 | Regenerate API types from `../api/openapi.json` | `pnpm gen:api` |
 
+Agent tests (`tests/agent`, `tests/api/test_agent_turns.py`, `tests/evals`) run in the default `pytest`. They use a scripted chat model and need no network, no provider key and no `apps/api/.env`; the agent tests block non-loopback sockets and disable LangSmith tracing. They replay the scenarios in `evals/agent/scenarios` ([evals/README.md](../evals/README.md)). Provider-backed checks arrive with the Groq phase and will be marked separately.
+
+`langgraph` pins `langgraph-sdk`, which requires `websockets<17`, so `websockets` resolves to 16.1.1. Nothing in the project uses WebSockets yet; re-evaluate this before the voice or streaming milestone.
+
 After changing an API schema: regenerate `openapi.json`, then run `pnpm gen:api`, and commit both. `apps/api/tests/api/test_openapi_contract.py` fails when `openapi.json` is stale.
 
 The API reads `apps/api/.env` (git-ignored; see `apps/api/.env.example`, placeholders only) and the process environment. Without either it runs in memory mode with seed data, which is what the tests and the smoke test below use. `VOICE_AGENT_ENV_FILE` overrides the file path (an empty value disables it). The web app never receives any database setting or the signing key.

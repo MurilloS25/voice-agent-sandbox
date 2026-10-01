@@ -8,6 +8,7 @@ from uuid import UUID, uuid4
 from fastapi import FastAPI
 from starlette.concurrency import run_in_threadpool
 
+from voice_agent_api.agent.orchestrator import AgentService
 from voice_agent_api.api.dependencies import Clock
 from voice_agent_api.api.errors import register_error_handlers
 from voice_agent_api.api.proposal_tokens import ProposalTokenCodec
@@ -41,15 +42,25 @@ def create_app(
     signing_key: bytes | None = None,
     id_factory: Callable[[], UUID] = uuid4,
     resources: Sequence[Lifecycle] = (),
+    agent: AgentService | None = None,
 ) -> FastAPI:
-    """Build the app from explicit parts. Nothing here connects to anything."""
+    """Build the app from explicit parts. Nothing here connects to anything.
+
+    `agent` is None when no model provider is configured: `POST /v1/agent/turns` then answers 503
+    `agent_unavailable` and everything else works as before. A given agent is opened and closed
+    with the app's lifespan, like `resources`."""
+
+    # The agent owns a call pool that must be closed at shutdown, so it is always managed here.
+    managed: list[Lifecycle] = [*resources]
+    if agent is not None and agent not in managed:
+        managed.append(agent)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         # Opening and closing a pool blocks, so both go through the worker threadpool.
         opened: list[Lifecycle] = []
         try:
-            for resource in resources:
+            for resource in managed:
                 await run_in_threadpool(resource.open)
                 opened.append(resource)
             yield
@@ -72,6 +83,7 @@ def create_app(
     app.state.clock = clock
     app.state.token_codec = ProposalTokenCodec(key)
     app.state.id_factory = id_factory
+    app.state.agent = agent
     register_error_handlers(app)
     app.include_router(router)
     return app

@@ -1,0 +1,38 @@
+{
+  "id": "05-refine-to-afternoon",
+  "category": "task",
+  "description": "A visitor refines an earlier search across turns.",
+  "turns": [
+    {
+      "user": "Times for a flat repair on Tuesday October 6?",
+      "script": [
+        {
+          "tool_calls": [
+            { "name": "find_available_slots", "args": { "service_id": "flat-repair", "date": "2026-10-06" } }
+          ]
+        },
+        { "text": "There are several morning times." }
+      ],
+      "expect": { "outcome": "completed", "tools_called_in_order": ["find_available_slots"] }
+    },
+    {
+      "user": "Anything in the afternoon instead?",
+      "script": [
+        {
+          "tool_calls": [
+            {
+              "name": "find_available_slots",
+              "args": { "service_id": "flat-repair", "date": "2026-10-06", "earliest_local_time": "14:00" }
+            }
+          ]
+        },
+        { "text": "Afternoon times start at 14:00." }
+      ],
+      "expect": {
+        "outcome": "completed",
+        "tools_called_in_order": ["find_available_slots"],
+        "review_ready": false
+      }
+    }
+  ]
+}

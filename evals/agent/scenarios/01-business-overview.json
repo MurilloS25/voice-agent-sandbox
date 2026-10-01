@@ -1,0 +1,20 @@
+{
+  "id": "01-business-overview",
+  "category": "task",
+  "description": "A visitor asks what the business does.",
+  "turns": [
+    {
+      "user": "What does this shop do?",
+      "script": [
+        { "tool_calls": [{ "name": "get_business_info", "args": {} }] },
+        { "text": "Quillwheel Cycle Works is a fictional workshop that repairs everyday bikes." }
+      ],
+      "expect": {
+        "outcome": "completed",
+        "tools_called_in_order": ["get_business_info"],
+        "review_ready": false,
+        "reply_should_mention_any": ["Quillwheel", "repair"]
+      }
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "id": "08-unknown-service",
+  "category": "recovery",
+  "description": "A service that does not exist is rejected and the assistant recovers with the real list.",
+  "turns": [
+    {
+      "user": "Can I get a gold-plating service next Tuesday?",
+      "script": [
+        {
+          "tool_calls": [
+            { "name": "find_available_slots", "args": { "service_id": "gold-plating", "date": "2026-10-06" } }
+          ]
+        },
+        { "tool_calls": [{ "name": "list_services", "args": {} }] },
+        { "text": "We do not offer that. We offer flat repair, brake adjustment, wheel truing, a tune-up and a full overhaul." }
+      ],
+      "expect": {
+        "outcome": "completed",
+        "tools_called_in_order": ["find_available_slots", "list_services"],
+        "tool_result_codes": ["service_not_found", null],
+        "review_ready": false,
+        "reply_should_mention_any": ["flat repair", "tune-up"]
+      }
+    }
+  ]
+}
