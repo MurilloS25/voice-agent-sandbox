@@ -112,11 +112,18 @@ TOOLS: dict[str, ToolSpec] = {
             "The shop's name, address, phone, opening hours and booking window.",
             NoArgs,
         ),
-        ToolSpec("list_services", "All services with duration and price.", NoArgs),
+        ToolSpec(
+            "list_services",
+            "All services with duration and exact price. Call it for every question about "
+            "services, prices, costs or comparisons.",
+            NoArgs,
+        ),
         ToolSpec(
             "find_available_slots",
             "Open appointment times for a service from a date, optionally for up to 3 days and "
-            "within a local time range. Returns slot ids to use with prepare_booking_review.",
+            "within a local time range. Call it for every question about availability, dates, "
+            "mornings or afternoons, including a refinement of an earlier search (afternoon: "
+            "earliest_local_time 12:00). Returns slot ids to use with prepare_booking_review.",
             FindAvailableSlotsArgs,
         ),
         ToolSpec(
