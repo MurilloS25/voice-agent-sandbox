@@ -20,7 +20,7 @@ export default async function Home(props: PageProps<"/">) {
   if (overview.kind !== "ok") {
     return (
       <main className="mx-auto max-w-2xl px-4 py-16 sm:px-8">
-        <h1 className="font-display text-5xl font-extrabold">
+        <h1 className="font-display text-4xl font-extrabold [overflow-wrap:anywhere] sm:text-5xl">
           Quillwheel Cycle Works
         </h1>
         <div className="mt-8">

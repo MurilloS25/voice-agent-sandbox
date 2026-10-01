@@ -2,7 +2,7 @@
 
 A visitor picks an open slot, sees a review of exactly what will be booked, and presses **Confirm booking**. They then see an appointment that is persisted in Supabase PostgreSQL. Double booking is impossible even under concurrent requests, retries never create duplicates, a slot taken or a service changed in the meantime produces a clear conflict state, and an unreachable or slow database produces a bounded, generic "unavailable" state rather than a hung request.
 
-**Status.** The provider-free slice is implemented and verified in memory: domain, signed proposals, fingerprint and stale detection, API, web, tests, migrations (syntax-checked, not executed) and the PostgreSQL adapter (exercised offline with a scripted fake pool). The steps that need a real Supabase project are gated (see Gates) and have not run. Nothing has been applied to any remote project.
+**Status.** Implemented and verified against a real Supabase development project (gates G1 to G7 and the end-to-end review are done). The three migrations are applied and verified (local and remote migration lists match; row-level security on every table; the advisors report no issues), the integration suite passes 15 of 15 against the real database, the API ran in PostgreSQL mode behind the production web build, and a scripted headless-browser review passed. Server-side SSL enforcement is deliberately **not** enabled (see Deferred). The demo database was reset to its seed state afterwards.
 
 ## Scope
 
@@ -34,22 +34,23 @@ Timeout budget: `statement_timeout` is per statement, so the worst case for a sl
 
 ## Gates
 
-Everything below needs the user and stops for approval before any external effect.
+Everything below needed the user's approval before any external effect.
 
 | Gate | Step | Status |
 | --- | --- | --- |
-| G1 | User creates a new Free-plan Supabase project and stores the postgres password in a password manager. | Pending |
-| G2 | User runs `supabase login`; `supabase link --project-ref <ref>` from `apps/api` (local config only). | Pending |
-| G3 | Read-only checks: `btree_gist` is available, `select version()`, `supabase migration list`, `supabase db advisors --help`, `psql --version`. | Pending. **`psql` is not installed on the development machine.** |
-| G4 | `supabase db push --dry-run`, user reviews, then `supabase db push` (a remote mutation). | Pending |
-| G5-pre | `psql --version` must succeed. If not, stop: install an official PostgreSQL client or approve another documented method. No automatic fallback. | **Blocked on psql** |
-| G5a | `secrets generate` creates `apps/api/.env` (local, secret files). | Pending |
-| G5b | User runs `\password voice_agent_api` in psql, then `alter role voice_agent_api login;`. | Pending |
-| G5c | `secrets check --connect`. | Pending |
-| G6 | `pytest -m integration` writes and deletes `source = 'test'` rows remotely. | Pending |
-| G7 | `demo_reset` against the remote project; optionally enable SSL enforcement (reboots the database). | Pending |
+| G1 | User creates a new Free-plan Supabase project and stores the postgres password in a password manager. | Done |
+| G2 | User runs `supabase login`; `supabase link --project-ref <ref>` from `apps/api` (local config only). | Done |
+| G3 | Read-only checks: `btree_gist` is available, `select version()`, `supabase migration list`, `supabase db advisors --help`, `psql --version`. | Done |
+| G4 | `supabase db push --dry-run`, user reviews, then `supabase db push` (a remote mutation). | Done. Three migrations applied; the post-migration queries in `docs/HARNESS.md` passed. |
+| G5-pre | `psql --version` must succeed. | Done (psql installed) |
+| G5a | `secrets generate` creates `apps/api/.env` (local, secret files). | Done |
+| G5b | User runs `\password voice_agent_api` in psql, then `alter role voice_agent_api login;`. | Done (by the user) |
+| G5c | `secrets check --connect`. | Done. Connects as `voice_agent_api` with `verify-full`. |
+| G6 | `pytest -m integration` writes and deletes `source = 'test'` rows remotely. | Done. 15 of 15 pass. One earlier run exposed a cold-pool `PoolTimeout` in the racing-proposals test (the test, not the production timeouts, was changed). |
+| G7 | `demo_reset` against the remote project. | Done. Four `seed` bookings inserted. |
+| (deferred) | Enable server-side SSL enforcement (reboots the database; the project owner does this in the dashboard). | **Not done.** Clients already use `verify-full`. |
 
-Not verified until the gates run: that `btree_gist` can be installed, that `create role` and `alter role … set …` work inside a pushed migration, that `lock_timeout` bounds an advisory-lock wait, the advisor results, and that the migrations execute at all.
+Verified against the real database: `lock_timeout` bounds an advisory-lock wait, the exclusion constraint rejects overlapping benches, concurrent confirmations of one slot create exactly two appointments on two benches, concurrent confirmations of one proposal create exactly one, `create role` and `alter role … set …` work inside a pushed migration, and the security and performance advisors report no issues.
 
 ## Verification
 
@@ -68,7 +69,7 @@ pnpm gen:api            # no change to src/lib/api/schema.d.ts afterwards
 pnpm lint
 pnpm format:check
 pnpm typecheck
-pnpm test               # 145 passed
+pnpm test               # 151 passed
 pnpm build
 ```
 
@@ -76,7 +77,14 @@ Also run: an end-to-end smoke test against the real API (memory mode) and the pr
 
 Reviewed: a read-only review of the whole diff (confirmation integrity, privacy, concurrency, contract) found no blockers. It found, and this change fixed: a replayed or re-read appointment showing catalog values that were never saved (appointments now store a snapshot of the booked service name, price and timezone, and the response is rendered from that row alone), a `slot_not_offered` confirm shown as a retryable error, a "not confirmed" claim for outcomes that are really unknown, a post-commit catalog read that could turn a successful booking into a 5xx, a wrong timeout budget (see above), missing TCP-level connection timeouts, `/book` making three API calls per view, `.env` files created world-readable, a loose fictional-phone check, and benches numbered with gaps. It also showed that app logging was never configured when run under uvicorn, and that the audit log recorded a submitted id; both are fixed and tested.
 
-Not run (gated): `supabase db push`, the integration suite (`python -m uv run pytest -m integration`), `supabase db advisors --type security|performance`, the post-migration queries in `docs/HARNESS.md`.
+Real-database and real-stack verification (done after the gates):
+
+- `python -m uv run pytest -m integration`: 15 passed.
+- API in PostgreSQL mode behind the production web build, driven over HTTP: 107 checks. The catalog and availability come from the database; a review writes nothing; a confirmation creates one `web_demo` appointment and repeats are idempotent; the appointment survives an API restart; two benches fill exactly once and a competing confirmation is refused with no overlap; tampered, malformed, expired, stale, derived-field and not-offered tokens write nothing; an API outage shows the fixed notice and the same review can be retried; no secret, token or database detail appears in any page, header, script, build asset or log.
+- Scripted headless-browser review (JavaScript on, `localhost` only, throwaway profile): 75 checks covering the full booking flow, keyboard and focus, the pending and disabled button and a double click, refresh and Back, the conflict, tampered, expired, stale, not-offered and unavailable states, layout at 1440, 390 and 320 px and at 200% text with no horizontal overflow, axe-core (including colour contrast) with no violations, no console errors, and no secret in anything the browser received. It found one defect, which is fixed and covered by tests: at 320 px with 200% text the display headings were wider than the screen and made the page scroll sideways.
+- `supabase db advisors --type security` and `--type performance`: no issues.
+
+The 40 px height of the open-time links on phones is above the WCAG 2.2 AA minimum (24 px) but below the 44 px platform guideline; it is left as is.
 
 ## Decisions or follow-ups
 
@@ -86,6 +94,7 @@ Deferred:
 
 - Cancel and reschedule.
 - Retention and cleanup of test or demo rows (pg_cron).
+- Server-side SSL enforcement on the Supabase project (needs a database reboot, so the owner chooses the moment).
 - Rate limiting, required before any public deployment.
 - Automated signing-key rotation (a manual runbook exists).
 - Transaction-mode pooling for serverless hosting.
@@ -93,15 +102,6 @@ Deferred:
 - A short-TTL catalog cache, if per-request catalog reads ever matter.
 - Persisted tool-event timeline, and an agent tool that proposes but never confirms.
 
-## Manual browser review (not yet done)
+## Manual review still open
 
-A scripted browser was not available, so these were checked only through jsdom tests and an end-to-end HTTP smoke test that drives the real Server Action without JavaScript. Please run them by hand in Chrome with both servers running in memory mode (`/book?service=flat-repair&start=<slot start>` is reachable from any time link on `/`):
-
-- **Flow, JavaScript on:** pick a service and date, click a time, check the review (service, date, time, duration, time zone, price, "Name on booking (fictional)", "Nothing has been booked yet", the demo banner), click **Confirm booking**, and land on `/appointments/<id>` with focus on the "Booked: …" heading.
-- **Double click** on Confirm booking: one appointment only; the button shows "Confirming…" and is disabled.
-- **Refresh and back:** refresh the review (a new review, no booking); after confirming, press Back and Confirm again (same appointment, no second booking); refresh the appointment page (same content).
-- **Conflict:** open the same review in two tabs after the slot has one bench left, confirm in both: the second shows "That time was just taken", no retry button, and the alert takes focus. (Booking a slot twice yourself uses both benches by design.)
-- **Unavailable and retry:** stop the API, click Confirm: "The schedule service isn't responding … confirming the same review twice never books twice", with **Try again**; restart the API and press Try again.
-- **Expired, stale, tampered, not offered:** these need a forged or old token, so use the smoke test, or wait 10 minutes on an open review for "expired".
-- **Keyboard:** Tab reaches the time links, then Confirm booking, then the links in any message; Enter or Space activates; the focus ring is visible; after a message appears focus is on the message.
-- **Layout:** at 1440 px, 390 px and 320 px wide, and at 200% text size (browser zoom or "text only"), check that nothing overflows horizontally, the details list stays readable, the Confirm button stays at least 48 px tall, and long names wrap.
+The scripted headless-browser review above replaced the hand checklist for flow, keyboard and focus, states, layout and accessibility rules. What it cannot show, and a person should still try before a public demo: a real phone, a screen reader announcing the focus moves and alerts, and the look of the page in the browsers the audience will use.

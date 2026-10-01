@@ -17,6 +17,9 @@ export const metadata: Metadata = {
 };
 
 const linkClass = "font-bold underline underline-offset-4";
+// `text-5xl` at a 320 px viewport with 200% text is wider than the longest word: start smaller, and allow a break.
+const headingClass =
+  "font-display text-4xl font-extrabold [overflow-wrap:anywhere] sm:text-5xl";
 
 /** The open-times section for a service, on a given local day when it is known. */
 function availabilityLink(serviceId: string, date: string | undefined): string {
@@ -42,9 +45,7 @@ export default async function BookPage(props: PageProps<"/book">) {
   if (!serviceId || !start) {
     return (
       <Shell>
-        <h1 className="font-display text-5xl font-extrabold">
-          Choose a time first
-        </h1>
+        <h1 className={headingClass}>Choose a time first</h1>
         <p>
           Pick a service and an open time to review a booking.{" "}
           <Link href="/#availability" className={linkClass}>
@@ -69,9 +70,7 @@ export default async function BookPage(props: PageProps<"/book">) {
     const backHref = availabilityLink(serviceId, date);
     return (
       <Shell>
-        <h1 className="font-display text-5xl font-extrabold">
-          We couldn&apos;t prepare that booking
-        </h1>
+        <h1 className={headingClass}>We couldn&apos;t prepare that booking</h1>
         {proposal.kind === "unavailable" ? (
           <ApiUnavailableNotice />
         ) : (
@@ -94,9 +93,7 @@ export default async function BookPage(props: PageProps<"/book">) {
 
   return (
     <Shell>
-      <h1 className="font-display text-5xl font-extrabold">
-        Review your booking
-      </h1>
+      <h1 className={headingClass}>Review your booking</h1>
       <BookingReview proposal={proposal.data} />
       <ConfirmForm
         token={proposal.data.proposal_token}

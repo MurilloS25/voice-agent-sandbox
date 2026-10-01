@@ -19,6 +19,32 @@ async function renderPage(id: string) {
 beforeEach(() => getAppointment.mockReset());
 
 describe("/appointments/[id]", () => {
+  // Real-browser review: at a 320 px viewport with 200% text the `text-5xl` heading is wider
+  // than the screen, so both heading states must allow a break inside a long word.
+  it.each([
+    [
+      "a saved booking",
+      { kind: "ok", data: appointment },
+      "Booked: Flat repair",
+    ],
+    [
+      "an unknown booking",
+      {
+        kind: "error",
+        status: 404,
+        code: "appointment_not_found",
+        message: "x",
+      },
+      "We couldn't show that booking",
+    ],
+  ])("keeps the heading breakable: %s", async (_state, result, heading) => {
+    getAppointment.mockResolvedValue(result);
+    await renderPage(appointment.id);
+    expect(screen.getByRole("heading", { name: heading })).toHaveClass(
+      "[overflow-wrap:anywhere]",
+    );
+  });
+
   it("shows the saved booking and moves focus to the heading", async () => {
     getAppointment.mockResolvedValue({ kind: "ok", data: appointment });
     await renderPage(appointment.id);

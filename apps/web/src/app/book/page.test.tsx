@@ -38,6 +38,33 @@ beforeEach(() => {
 });
 
 describe("/book", () => {
+  // Real-browser review: at a 320 px viewport with 200% text the `text-5xl` heading is wider
+  // than the screen, so every heading state must allow a break inside a long word.
+  it.each([
+    ["no selection", {}, null, "Choose a time first"],
+    [
+      "a rejected selection",
+      { service: "flat-repair", start: "nope" },
+      { kind: "error", status: 422, code: "validation_error", message: "x" },
+      "We couldn't prepare that booking",
+    ],
+    [
+      "a valid selection",
+      { service: "flat-repair", start: proposal.start },
+      { kind: "ok", data: proposal },
+      "Review your booking",
+    ],
+  ])(
+    "keeps the heading breakable: %s",
+    async (_state, search, result, heading) => {
+      if (result) createProposal.mockResolvedValue(result);
+      await renderPage(search);
+      expect(screen.getByRole("heading", { name: heading })).toHaveClass(
+        "[overflow-wrap:anywhere]",
+      );
+    },
+  );
+
   it("asks for a selection when none is given, without calling the API", async () => {
     await renderPage({});
     expect(

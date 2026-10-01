@@ -7,7 +7,7 @@ Portfolio project exploring how a voice-enabled AI agent can handle realistic bu
 Two milestones are implemented:
 
 - Foundation ([plan](docs/plans/0001-project-foundation.md)): a FastAPI backend with deterministic availability for a fictional bicycle workshop, and a Next.js page that shows its services, opening hours, and open appointment times.
-- Booking with explicit confirmation ([plan](docs/plans/0002-booking-persistence.md)): pick an open time, review exactly what will be booked, and confirm it explicitly. Confirmation re-checks availability transactionally, assigns one of two benches, is idempotent, and detects a changed catalog or a taken slot without writing. It runs in memory today; the PostgreSQL (Supabase) adapter, migrations and integration tests are written but have not yet been run against a real project, which needs steps that only the project owner can approve (see the plan's gates).
+- Booking with explicit confirmation ([plan](docs/plans/0002-booking-persistence.md)): pick an open time, review exactly what will be booked, and confirm it explicitly. Confirmation re-checks availability transactionally, assigns one of two benches, is idempotent, and detects a changed catalog or a taken slot without writing. It runs in memory by default and against a Supabase PostgreSQL development project when configured: the migrations are applied, the integration tests pass against the real database, and the full flow was verified through the production web build and a scripted headless browser. Server-side SSL enforcement is not enabled yet (clients already verify the certificate), and a hand review on a real phone and screen reader is still open (see the plan).
 
 The agent, voice, authentication, rescheduling, and cancellation are not built yet.
 

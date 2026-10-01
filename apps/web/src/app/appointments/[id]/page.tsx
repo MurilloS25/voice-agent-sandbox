@@ -12,7 +12,9 @@ export const metadata: Metadata = {
 };
 
 const linkClass = "font-bold underline underline-offset-4";
-const headingClass = "font-display text-5xl font-extrabold";
+// `text-5xl` at a 320 px viewport with 200% text is wider than the longest word: start smaller, and allow a break.
+const headingClass =
+  "font-display text-4xl font-extrabold [overflow-wrap:anywhere] sm:text-5xl";
 
 export default async function AppointmentPage(
   props: PageProps<"/appointments/[id]">,

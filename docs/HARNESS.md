@@ -69,6 +69,16 @@ Everything here changes a remote project or creates a secret, so each step waits
 
 Fill the non-secret `DB_HOST`, `DB_USER` (`voice_agent_api.<project_ref>`) and `DB_SSLROOTCERT` (the CA certificate from the dashboard) in `.env`, then set `APPOINTMENT_STORE=postgres`.
 
+Verifying against the real database (done once for Milestone 2; repeat after DB-facing changes):
+
+1. `python -m uv run pytest -m integration` (15 tests; creates and deletes only `source = 'test'` rows, and leaves none behind).
+2. With `APPOINTMENT_STORE=postgres`, `python -m uv run python -m voice_agent_api.demo_reset --yes` deletes only `seed` and `web_demo` rows and inserts the four fictional seed bookings. Afterwards the counts by source should be `seed = 4` and nothing else.
+3. Start the API and `pnpm build && pnpm start` in `apps/web`, then repeat the smoke test above. Also check that a review writes nothing, that confirming twice yields one appointment, that a full slot shows the conflict, and that stopping the API shows the unavailable notice and a retry works.
+4. For a browser check, drive a headless Chromium-based browser over the DevTools protocol against `localhost` with a throwaway profile (no extensions, no signed-in profile), keeping screenshots outside the repository. Check at 1440, 390 and 320 px and at 200% text: no horizontal scroll, axe-core clean, keyboard order and focus, no console errors. The scripts used for Milestone 2 are not committed.
+5. Run `demo_reset --yes` again, and confirm there are no `test` rows.
+
+Server-side SSL enforcement is not enabled (it reboots the database); clients already use `sslmode=verify-full`.
+
 Rotation or suspected leak: `secrets generate --rotate`, run `\password voice_agent_api` again with the new `DB_PASSWORD`, and restart the API. The old password stops working immediately. A rotated signing key invalidates reviews that are open (they last 10 minutes).
 
 After `db push`, these queries should return nothing for the first and `false, false, false, true, false, false` for the second (the same checks run in `tests/integration`):
