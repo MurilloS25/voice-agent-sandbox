@@ -32,12 +32,16 @@ The browser sends transcript text to the API. The orchestration layer interprets
 - Use PostgreSQL because appointments, availability, and audit events are relational.
 - Store structured execution events, not chain-of-thought or raw audio.
 - The web app calls the API from Server Components, so the browser never contacts the API directly and no CORS is configured yet. Response types are generated from FastAPI's OpenAPI schema ([ADR 0001](decisions/0001-openapi-as-contract-source.md)).
-- The domain layer (`apps/api/src/voice_agent_api/domain`) has no framework imports and reaches storage only through the `BusinessCatalog` and `AppointmentBook` ports. An in-memory adapter implements them today.
+- The domain layer (`apps/api/src/voice_agent_api/domain`) has no framework imports and reaches storage only through the `BusinessCatalog` and `AppointmentBook` ports. An in-memory adapter (the default, used by unit tests) and a PostgreSQL adapter implement them.
+- The API talks to PostgreSQL directly with psycopg, in a private `booking` schema, as a least-privilege role, with no Data API and no Supabase key ([ADR 0002](decisions/0002-direct-postgres-private-schema.md)). Blocking database calls always run in the worker threadpool and every request has bounded timeouts.
+- Each appointment holds one bench and the database enforces it with an exclusion constraint ([ADR 0003](decisions/0003-one-bench-per-appointment.md)).
+- A booking is created only from a signed, short-lived proposal that is re-derived and fingerprint-checked on confirm, and is idempotent per proposal ([ADR 0004](decisions/0004-signed-proposals-and-stale-detection.md)).
+- The catalog lives in PostgreSQL and changes only through Supabase CLI migrations ([ADR 0005](decisions/0005-catalog-in-postgres-via-cli-migrations.md)). Secrets are generated locally and validated at startup ([ADR 0006](decisions/0006-secret-provisioning-and-validation.md)).
 - Deploy the web interface to Vercel; choose API hosting only after validating streaming and latency requirements.
 
 ## First vertical slice
 
-A user asks about services and availability, selects a fictional slot, confirms it, and receives a persisted appointment plus a visible tool-event timeline. Text interaction is sufficient for this slice. Voice, rescheduling, cancellation, and richer evaluation follow after the core behavior is measured.
+A user asks about services and availability, selects a fictional slot, confirms it, and receives a persisted appointment plus a visible tool-event timeline. Text interaction is sufficient for this slice. The select, review, confirm and persist part is built ([plan 0002](plans/0002-booking-persistence.md)); the conversational interface and the tool-event timeline are not. Voice, rescheduling, cancellation, and richer evaluation follow after the core behavior is measured.
 
 ## Decisions still requiring evidence
 

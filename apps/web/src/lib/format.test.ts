@@ -7,6 +7,8 @@ import {
   formatPrice,
   formatSlotTime,
   formatTimezoneLabel,
+  localDateOf,
+  tryLocalDateOf,
   weekdayIndex,
 } from "./format";
 
@@ -108,4 +110,38 @@ describe("date helpers", () => {
       "Eastern Time (America/New_York)",
     );
   });
+});
+
+describe("localDateOf", () => {
+  it("returns the calendar date in the given timezone, not in UTC", () => {
+    // 02:00 UTC on 2 October is still the evening of 1 October in New York.
+    expect(localDateOf("2026-10-02T02:00:00Z", "America/New_York")).toBe(
+      "2026-10-01",
+    );
+    expect(localDateOf("2026-10-02T02:00:00Z", "UTC")).toBe("2026-10-02");
+    expect(localDateOf("2026-10-01T13:00:00Z", "America/New_York")).toBe(
+      "2026-10-01",
+    );
+  });
+
+  it("handles the daylight-saving change day", () => {
+    expect(localDateOf("2026-11-01T05:30:00Z", "America/New_York")).toBe(
+      "2026-11-01",
+    );
+  });
+});
+
+describe("tryLocalDateOf", () => {
+  it("returns the local date for a valid instant", () => {
+    expect(tryLocalDateOf("2026-10-01T13:00:00Z", "America/New_York")).toBe(
+      "2026-10-01",
+    );
+  });
+
+  it.each(["nope", "", "2026-13-45T99:99:99Z"])(
+    "returns undefined instead of throwing for %j",
+    (value) => {
+      expect(tryLocalDateOf(value, "America/New_York")).toBeUndefined();
+    },
+  );
 });

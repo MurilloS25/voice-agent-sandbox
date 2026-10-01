@@ -3,6 +3,7 @@
 Nothing here describes a real business or person.
 """
 
+from collections.abc import Callable
 from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
@@ -97,10 +98,10 @@ def _next_open_dates(hours: WeeklyHours, after: date, count: int) -> list[date]:
     return dates
 
 
-def _booking(service_id: str, local_date: date, start: time, minutes: int) -> Booking:
+def _booking(service_id: str, local_date: date, start: time, minutes: int, bench: int) -> Booking:
     local_start = datetime.combine(local_date, start).replace(tzinfo=BUSINESS.timezone)
     start_utc = local_start.astimezone(UTC)
-    return Booking(service_id, start_utc, start_utc + timedelta(minutes=minutes))
+    return Booking(service_id, start_utc, start_utc + timedelta(minutes=minutes), bench)
 
 
 def seed_bookings(now: datetime) -> list[Booking]:
@@ -108,17 +109,19 @@ def seed_bookings(now: datetime) -> list[Booking]:
     today = now.astimezone(BUSINESS.timezone).date()
     first, second = _next_open_dates(HOURS, today, 2)
     return [
-        # First open day: both benches busy 10:00-11:30, one bench busy 14:00-14:45.
-        _booking("standard-tune-up", first, time(10, 0), 90),
-        _booking("standard-tune-up", first, time(10, 0), 90),
-        _booking("brake-adjustment", first, time(14, 0), 45),
-        # Second open day: one bench busy all morning.
-        _booking("full-overhaul", second, time(9, 0), 240),
+        # First open day: both benches busy 10:00-11:30, bench 1 busy 14:00-14:45.
+        _booking("standard-tune-up", first, time(10, 0), 90, bench=1),
+        _booking("standard-tune-up", first, time(10, 0), 90, bench=2),
+        _booking("brake-adjustment", first, time(14, 0), 45, bench=1),
+        # Second open day: bench 1 busy all morning.
+        _booking("full-overhaul", second, time(9, 0), 240, bench=1),
     ]
 
 
-def build_seed(now: datetime) -> tuple[InMemoryCatalog, InMemoryAppointmentBook]:
-    return (
-        InMemoryCatalog(BUSINESS, HOURS, SERVICES),
-        InMemoryAppointmentBook(seed_bookings(now)),
-    )
+def build_seed(
+    now: datetime, clock: Callable[[], datetime] | None = None
+) -> tuple[InMemoryCatalog, InMemoryAppointmentBook]:
+    """The fictional catalog and bookings. `clock` stamps created appointments (default: `now`)."""
+    catalog = InMemoryCatalog(BUSINESS, HOURS, SERVICES)
+    book = InMemoryAppointmentBook(catalog, seed_bookings(now), clock or (lambda: now))
+    return catalog, book

@@ -6,6 +6,8 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "fastapi[standard]>=0.142.2",
+    "psycopg[binary,pool]>=3.3.6",
+    "pydantic-settings>=2.15.0",
     "tzdata>=2026.4",
 ]
 
@@ -34,3 +36,8 @@ files = ["src", "tests"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "integration: needs a real PostgreSQL database (apps/api/.env). Run with `-m integration`.",
+]
+# Integration tests write to a real database, so they never run unless asked for.
+addopts = '-m "not integration"'

@@ -106,8 +106,8 @@ def test_one_booking_leaves_the_other_bench_free() -> None:
 
 def test_full_benches_block_only_overlapping_slots() -> None:
     bookings = [
-        local_booking("x", TUESDAY, time(10, 0), 30),
-        local_booking("y", TUESDAY, time(10, 0), 30),
+        local_booking("x", TUESDAY, time(10, 0), 30, bench=1),
+        local_booking("y", TUESDAY, time(10, 0), 30, bench=2),
     ]
     starts = local_starts(slots_for(FLAT_REPAIR, TUESDAY, bookings))
     assert "10:00" not in starts
@@ -115,23 +115,34 @@ def test_full_benches_block_only_overlapping_slots() -> None:
     assert "10:30" in starts  # starts exactly when the bookings end
 
 
-def test_back_to_back_bookings_only_ever_occupy_one_bench() -> None:
-    # Two benches; 10:00-10:45 and 10:45-11:30 never run at the same time, so a 45-minute
-    # job at 10:30-11:15 still has a free bench the whole way through.
+def test_back_to_back_bookings_on_one_bench_leave_the_other_bench_free() -> None:
+    # 10:00-10:45 and 10:45-11:30 both run on bench 1, so bench 2 is free the whole way
+    # through a 45-minute job at 10:30-11:15.
     brake = Service("brake", "Brake adjustment", "", timedelta(minutes=45), FLAT_REPAIR.price)
     bookings = [
-        local_booking("x", TUESDAY, time(10, 0), 45),
-        local_booking("y", TUESDAY, time(10, 45), 45),
+        local_booking("x", TUESDAY, time(10, 0), 45, bench=1),
+        local_booking("y", TUESDAY, time(10, 45), 45, bench=1),
     ]
     assert "10:30" in local_starts(slots_for(brake, TUESDAY, bookings))
+
+
+def test_back_to_back_bookings_on_different_benches_block_a_job_spanning_both() -> None:
+    # One bench per job: bench 1 is busy until 10:45 and bench 2 from 10:45, so no single
+    # bench is free for the whole of 10:30-11:15 (peak concurrency alone would allow it).
+    brake = Service("brake", "Brake adjustment", "", timedelta(minutes=45), FLAT_REPAIR.price)
+    bookings = [
+        local_booking("x", TUESDAY, time(10, 0), 45, bench=1),
+        local_booking("y", TUESDAY, time(10, 45), 45, bench=2),
+    ]
+    assert "10:30" not in local_starts(slots_for(brake, TUESDAY, bookings))
 
 
 def test_overlap_reaching_capacity_anywhere_inside_the_span_blocks_the_slot() -> None:
     # Both benches are busy 10:30-10:45 (x runs 10:30-11:30, y runs 10:30-10:45).
     brake = Service("brake", "Brake adjustment", "", timedelta(minutes=45), FLAT_REPAIR.price)
     bookings = [
-        local_booking("x", TUESDAY, time(10, 30), 60),
-        local_booking("y", TUESDAY, time(10, 30), 15),
+        local_booking("x", TUESDAY, time(10, 30), 60, bench=1),
+        local_booking("y", TUESDAY, time(10, 30), 15, bench=2),
     ]
     starts = local_starts(slots_for(brake, TUESDAY, bookings))
     assert "10:00" not in starts  # 10:00-10:45 is inside the fully busy stretch
@@ -142,8 +153,8 @@ def test_overlap_reaching_capacity_anywhere_inside_the_span_blocks_the_slot() ->
 
 def test_long_service_is_blocked_by_a_booking_inside_its_span() -> None:
     bookings = [
-        local_booking("x", TUESDAY, time(10, 30), 30),
-        local_booking("y", TUESDAY, time(10, 30), 30),
+        local_booking("x", TUESDAY, time(10, 30), 30, bench=1),
+        local_booking("y", TUESDAY, time(10, 30), 30, bench=2),
     ]
     starts = local_starts(slots_for(TUNE_UP, TUESDAY, bookings))
     # Every 90-minute start from 09:30 through 10:30 overlaps the busy half hour.

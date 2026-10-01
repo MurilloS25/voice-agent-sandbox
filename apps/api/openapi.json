@@ -1,6 +1,174 @@
 {
   "components": {
     "schemas": {
+      "AppointmentProposalRequest": {
+        "properties": {
+          "service_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Service Id",
+            "type": "string"
+          },
+          "start": {
+            "description": "Requested slot start. Must include a UTC offset.",
+            "format": "date-time",
+            "title": "Start",
+            "type": "string"
+          }
+        },
+        "required": [
+          "service_id",
+          "start"
+        ],
+        "title": "AppointmentProposalRequest",
+        "type": "object"
+      },
+      "AppointmentProposalResponse": {
+        "description": "What confirming would book. Nothing has been saved yet.",
+        "properties": {
+          "customer_alias": {
+            "description": "Fictional demo name the server assigned.",
+            "title": "Customer Alias",
+            "type": "string"
+          },
+          "end": {
+            "description": "End, UTC. Computed by the server.",
+            "format": "date-time",
+            "title": "End",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "proposal_token": {
+            "description": "Signed, short-lived. Send it back to confirm.",
+            "title": "Proposal Token",
+            "type": "string"
+          },
+          "service": {
+            "$ref": "#/components/schemas/ServiceResponse"
+          },
+          "start": {
+            "description": "Start, UTC.",
+            "format": "date-time",
+            "title": "Start",
+            "type": "string"
+          },
+          "timezone": {
+            "title": "Timezone",
+            "type": "string"
+          }
+        },
+        "required": [
+          "proposal_token",
+          "expires_at",
+          "service",
+          "start",
+          "end",
+          "timezone",
+          "customer_alias"
+        ],
+        "title": "AppointmentProposalResponse",
+        "type": "object"
+      },
+      "AppointmentResponse": {
+        "description": "What the schedule service confirmed and saved. Rendered from the saved row only.",
+        "properties": {
+          "bench": {
+            "title": "Bench",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "customer_alias": {
+            "title": "Customer Alias",
+            "type": "string"
+          },
+          "end": {
+            "description": "End, UTC.",
+            "format": "date-time",
+            "title": "End",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "service": {
+            "$ref": "#/components/schemas/AppointmentServiceResponse"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "start": {
+            "description": "Start, UTC.",
+            "format": "date-time",
+            "title": "Start",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "confirmed",
+              "cancelled"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "timezone": {
+            "title": "Timezone",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "service",
+          "start",
+          "end",
+          "timezone",
+          "customer_alias",
+          "bench",
+          "source",
+          "created_at"
+        ],
+        "title": "AppointmentResponse",
+        "type": "object"
+      },
+      "AppointmentServiceResponse": {
+        "description": "The service as it was when the appointment was booked (a saved snapshot).",
+        "properties": {
+          "duration_minutes": {
+            "title": "Duration Minutes",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "price": {
+            "$ref": "#/components/schemas/MoneyResponse"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "duration_minutes",
+          "price"
+        ],
+        "title": "AppointmentServiceResponse",
+        "type": "object"
+      },
       "AvailabilityResponse": {
         "properties": {
           "date": {
@@ -115,6 +283,28 @@
           "booking_window"
         ],
         "title": "BusinessResponse",
+        "type": "object"
+      },
+      "ConfirmAppointmentRequest": {
+        "properties": {
+          "confirm": {
+            "const": true,
+            "description": "Must be true: the user explicitly confirmed.",
+            "title": "Confirm",
+            "type": "boolean"
+          },
+          "proposal_token": {
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Proposal Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "proposal_token",
+          "confirm"
+        ],
+        "title": "ConfirmAppointmentRequest",
         "type": "object"
       },
       "ErrorBody": {
@@ -321,7 +511,7 @@
     }
   },
   "info": {
-    "description": "Fictional business data and deterministic availability. Demo data only.",
+    "description": "Fictional business data, deterministic availability, and explicit-confirmation booking. Demo data only.",
     "title": "Voice Agent Sandbox API",
     "version": "0.1.0"
   },
@@ -348,6 +538,213 @@
         ]
       }
     },
+    "/v1/appointment-proposals": {
+      "post": {
+        "description": "Describe what booking this slot would do. Nothing is saved.",
+        "operationId": "create_appointment_proposal_v1_appointment_proposals_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AppointmentProposalRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppointmentProposalResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unknown service."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "slot_unavailable: every bench is taken."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "validation_error, date_out_of_range or slot_not_offered."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Storage unavailable."
+          }
+        },
+        "summary": "Create Appointment Proposal",
+        "tags": [
+          "appointments"
+        ]
+      }
+    },
+    "/v1/appointments": {
+      "post": {
+        "description": "The only write. Requires a valid proposal token and an explicit `confirm: true`.",
+        "operationId": "confirm_appointment_route_v1_appointments_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmAppointmentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppointmentResponse"
+                }
+              }
+            },
+            "description": "The proposal had already been confirmed: the original appointment."
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppointmentResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "slot_unavailable (just taken) or proposal_stale (details changed)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "validation_error, proposal_invalid, proposal_expired, or slot_not_offered (the time is no longer offered, for example it is now inside the lead time)."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Storage unavailable."
+          }
+        },
+        "summary": "Confirm Appointment Route",
+        "tags": [
+          "appointments"
+        ]
+      }
+    },
+    "/v1/appointments/{appointment_id}": {
+      "get": {
+        "operationId": "read_appointment_v1_appointments__appointment_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "appointment_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Appointment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppointmentResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unknown appointment."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid appointment id."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Storage unavailable."
+          }
+        },
+        "summary": "Read Appointment",
+        "tags": [
+          "appointments"
+        ]
+      }
+    },
     "/v1/business": {
       "get": {
         "operationId": "read_business_v1_business_get",
@@ -361,6 +758,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Storage unavailable."
           }
         },
         "summary": "Read Business",
@@ -382,6 +789,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Storage unavailable."
           }
         },
         "summary": "List Services",
@@ -446,6 +863,16 @@
               }
             },
             "description": "Invalid request or date outside the window."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Storage unavailable."
           }
         },
         "summary": "Read Availability",

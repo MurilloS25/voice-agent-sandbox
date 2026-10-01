@@ -1,4 +1,10 @@
-import type { Availability, Business, Service } from "@/lib/api/client";
+import type {
+  Appointment,
+  AppointmentProposal,
+  Availability,
+  Business,
+  Service,
+} from "@/lib/api/client";
 
 export const services: Service[] = [
   {
@@ -42,4 +48,33 @@ export const availability: Availability = {
     { start: "2026-10-01T13:00:00Z", end: "2026-10-01T13:30:00Z" },
     { start: "2026-10-01T15:30:00Z", end: "2026-10-01T16:00:00Z" },
   ],
+};
+
+export const proposal: AppointmentProposal = {
+  proposal_token: "v1.eyJ2IjoxfQ.c2lnbmF0dXJl",
+  expires_at: "2026-09-30T12:10:00Z",
+  service: services[0],
+  start: "2026-10-01T13:00:00Z",
+  end: "2026-10-01T13:30:00Z",
+  timezone: "America/New_York",
+  customer_alias: "Demo Amber Heron",
+};
+
+export const appointment: Appointment = {
+  id: "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d",
+  status: "confirmed",
+  // The saved snapshot: no description, and the duration is end minus start.
+  service: {
+    id: "flat-repair",
+    name: "Flat repair",
+    duration_minutes: 30,
+    price: { amount_minor: 1500, currency: "USD" },
+  },
+  start: "2026-10-01T13:00:00Z",
+  end: "2026-10-01T13:30:00Z",
+  timezone: "America/New_York",
+  customer_alias: "Demo Amber Heron",
+  bench: 1,
+  source: "web_demo",
+  created_at: "2026-09-30T12:03:00Z",
 };

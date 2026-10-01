@@ -90,3 +90,29 @@ export function formatTimezoneLabel(timeZone: string): string {
     parts.find((part) => part.type === "timeZoneName")?.value ?? timeZone;
   return `${name} (${timeZone})`;
 }
+
+/** The calendar date ("YYYY-MM-DD") of a UTC instant as seen in the given IANA timezone. */
+export function localDateOf(iso: string, timeZone: string): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date(iso));
+  const part = (type: string) =>
+    parts.find((p) => p.type === type)?.value ?? "";
+  return `${part("year")}-${part("month")}-${part("day")}`;
+}
+
+/** Like `localDateOf`, but returns undefined for a value that is not a valid instant. */
+export function tryLocalDateOf(
+  iso: string,
+  timeZone: string,
+): string | undefined {
+  try {
+    return localDateOf(iso, timeZone);
+  } catch (error) {
+    if (error instanceof RangeError) return undefined;
+    throw error;
+  }
+}

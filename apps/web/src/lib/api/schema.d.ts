@@ -21,6 +21,63 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v1/appointment-proposals": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Create Appointment Proposal
+     * @description Describe what booking this slot would do. Nothing is saved.
+     */
+    post: operations["create_appointment_proposal_v1_appointment_proposals_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/appointments": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Confirm Appointment Route
+     * @description The only write. Requires a valid proposal token and an explicit `confirm: true`.
+     */
+    post: operations["confirm_appointment_route_v1_appointments_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/appointments/{appointment_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Read Appointment */
+    get: operations["read_appointment_v1_appointments__appointment_id__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/business": {
     parameters: {
       query?: never;
@@ -76,6 +133,108 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
+    /** AppointmentProposalRequest */
+    AppointmentProposalRequest: {
+      /** Service Id */
+      service_id: string;
+      /**
+       * Start
+       * Format: date-time
+       * @description Requested slot start. Must include a UTC offset.
+       */
+      start: string;
+    };
+    /**
+     * AppointmentProposalResponse
+     * @description What confirming would book. Nothing has been saved yet.
+     */
+    AppointmentProposalResponse: {
+      /**
+       * Customer Alias
+       * @description Fictional demo name the server assigned.
+       */
+      customer_alias: string;
+      /**
+       * End
+       * Format: date-time
+       * @description End, UTC. Computed by the server.
+       */
+      end: string;
+      /**
+       * Expires At
+       * Format: date-time
+       */
+      expires_at: string;
+      /**
+       * Proposal Token
+       * @description Signed, short-lived. Send it back to confirm.
+       */
+      proposal_token: string;
+      service: components["schemas"]["ServiceResponse"];
+      /**
+       * Start
+       * Format: date-time
+       * @description Start, UTC.
+       */
+      start: string;
+      /** Timezone */
+      timezone: string;
+    };
+    /**
+     * AppointmentResponse
+     * @description What the schedule service confirmed and saved. Rendered from the saved row only.
+     */
+    AppointmentResponse: {
+      /** Bench */
+      bench: number;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /** Customer Alias */
+      customer_alias: string;
+      /**
+       * End
+       * Format: date-time
+       * @description End, UTC.
+       */
+      end: string;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      service: components["schemas"]["AppointmentServiceResponse"];
+      /** Source */
+      source: string;
+      /**
+       * Start
+       * Format: date-time
+       * @description Start, UTC.
+       */
+      start: string;
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: "confirmed" | "cancelled";
+      /** Timezone */
+      timezone: string;
+    };
+    /**
+     * AppointmentServiceResponse
+     * @description The service as it was when the appointment was booked (a saved snapshot).
+     */
+    AppointmentServiceResponse: {
+      /** Duration Minutes */
+      duration_minutes: number;
+      /** Id */
+      id: string;
+      /** Name */
+      name: string;
+      price: components["schemas"]["MoneyResponse"];
+    };
     /** AvailabilityResponse */
     AvailabilityResponse: {
       /**
@@ -130,6 +289,17 @@ export interface components {
        * @description IANA timezone of the business.
        */
       timezone: string;
+    };
+    /** ConfirmAppointmentRequest */
+    ConfirmAppointmentRequest: {
+      /**
+       * Confirm
+       * @description Must be true: the user explicitly confirmed.
+       * @constant
+       */
+      confirm: true;
+      /** Proposal Token */
+      proposal_token: string;
     };
     /** ErrorBody */
     ErrorBody: {
@@ -257,6 +427,175 @@ export interface operations {
       };
     };
   };
+  create_appointment_proposal_v1_appointment_proposals_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AppointmentProposalRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AppointmentProposalResponse"];
+        };
+      };
+      /** @description Unknown service. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description slot_unavailable: every bench is taken. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description validation_error, date_out_of_range or slot_not_offered. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Storage unavailable. */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  confirm_appointment_route_v1_appointments_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ConfirmAppointmentRequest"];
+      };
+    };
+    responses: {
+      /** @description The proposal had already been confirmed: the original appointment. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AppointmentResponse"];
+        };
+      };
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AppointmentResponse"];
+        };
+      };
+      /** @description slot_unavailable (just taken) or proposal_stale (details changed). */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description validation_error, proposal_invalid, proposal_expired, or slot_not_offered (the time is no longer offered, for example it is now inside the lead time). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Storage unavailable. */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  read_appointment_v1_appointments__appointment_id__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        appointment_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AppointmentResponse"];
+        };
+      };
+      /** @description Unknown appointment. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Invalid appointment id. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Storage unavailable. */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
   read_business_v1_business_get: {
     parameters: {
       query?: never;
@@ -273,6 +612,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["BusinessResponse"];
+        };
+      };
+      /** @description Storage unavailable. */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
         };
       };
     };
@@ -293,6 +641,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["ServicesResponse"];
+        };
+      };
+      /** @description Storage unavailable. */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
         };
       };
     };
@@ -331,6 +688,15 @@ export interface operations {
       };
       /** @description Invalid request or date outside the window. */
       422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Storage unavailable. */
+      503: {
         headers: {
           [name: string]: unknown;
         };

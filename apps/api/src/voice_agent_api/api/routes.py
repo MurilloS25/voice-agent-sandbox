@@ -1,15 +1,35 @@
+"""HTTP routes.
+
+Every route that reaches the catalog or the appointment book is a plain `def`, so FastAPI runs
+it in the worker threadpool. The Postgres adapter is synchronous; an `async def` route calling
+it would block the event loop for every other request. A test enforces this.
+"""
+
+import logging
 import re
 from datetime import date
 from typing import Annotated, Any
+from uuid import UUID
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Response
 from pydantic import BeforeValidator
 
-from voice_agent_api.api.dependencies import AppointmentsDep, CatalogDep, ClockDep
+from voice_agent_api.api.dependencies import (
+    AppointmentsDep,
+    CatalogDep,
+    ClockDep,
+    IdFactoryDep,
+    TokenCodecDep,
+)
 from voice_agent_api.api.schemas import (
+    AppointmentProposalRequest,
+    AppointmentProposalResponse,
+    AppointmentResponse,
+    AppointmentServiceResponse,
     AvailabilityResponse,
     BookingWindowResponse,
     BusinessResponse,
+    ConfirmAppointmentRequest,
     ErrorResponse,
     HealthResponse,
     MoneyResponse,
@@ -19,10 +39,13 @@ from voice_agent_api.api.schemas import (
     SlotResponse,
 )
 from voice_agent_api.domain.availability import booking_window
-from voice_agent_api.domain.models import Service
-from voice_agent_api.domain.queries import get_availability
+from voice_agent_api.domain.commands import confirm_appointment, propose_appointment
+from voice_agent_api.domain.errors import AppointmentNotFound
+from voice_agent_api.domain.models import Appointment, Service
+from voice_agent_api.domain.queries import query_availability
 
 router = APIRouter()
+logger = logging.getLogger("voice_agent_api")
 
 _DATE_ONLY = re.compile(r"\d{4}-\d{2}-\d{2}")
 
@@ -39,6 +62,42 @@ DateOnly = Annotated[date, BeforeValidator(_require_date_only)]
 _AVAILABILITY_ERRORS: dict[int | str, dict[str, Any]] = {
     404: {"model": ErrorResponse, "description": "Unknown service."},
     422: {"model": ErrorResponse, "description": "Invalid request or date outside the window."},
+    503: {"model": ErrorResponse, "description": "Storage unavailable."},
+}
+
+_PROPOSAL_ERRORS: dict[int | str, dict[str, Any]] = {
+    404: {"model": ErrorResponse, "description": "Unknown service."},
+    409: {"model": ErrorResponse, "description": "slot_unavailable: every bench is taken."},
+    422: {
+        "model": ErrorResponse,
+        "description": "validation_error, date_out_of_range or slot_not_offered.",
+    },
+    503: {"model": ErrorResponse, "description": "Storage unavailable."},
+}
+
+_CONFIRM_ERRORS: dict[int | str, dict[str, Any]] = {
+    200: {
+        "model": AppointmentResponse,
+        "description": "The proposal had already been confirmed: the original appointment.",
+    },
+    409: {
+        "model": ErrorResponse,
+        "description": "slot_unavailable (just taken) or proposal_stale (details changed).",
+    },
+    422: {
+        "model": ErrorResponse,
+        "description": (
+            "validation_error, proposal_invalid, proposal_expired, or slot_not_offered "
+            "(the time is no longer offered, for example it is now inside the lead time)."
+        ),
+    },
+    503: {"model": ErrorResponse, "description": "Storage unavailable."},
+}
+
+_GET_APPOINTMENT_ERRORS: dict[int | str, dict[str, Any]] = {
+    404: {"model": ErrorResponse, "description": "Unknown appointment."},
+    422: {"model": ErrorResponse, "description": "Invalid appointment id."},
+    503: {"model": ErrorResponse, "description": "Storage unavailable."},
 }
 
 
@@ -54,14 +113,45 @@ def _service_response(service: Service) -> ServiceResponse:
     )
 
 
+def _appointment_response(appointment: Appointment) -> AppointmentResponse:
+    """Built from the saved row alone, so a replay is identical even if the catalog changed."""
+    minutes = int((appointment.end - appointment.start).total_seconds() // 60)
+    return AppointmentResponse(
+        id=appointment.id,
+        status="confirmed" if appointment.status == "confirmed" else "cancelled",
+        service=AppointmentServiceResponse(
+            id=appointment.service_id,
+            name=appointment.service_name,
+            duration_minutes=minutes,
+            price=MoneyResponse(
+                amount_minor=appointment.price.amount_minor,
+                currency=appointment.price.currency,
+            ),
+        ),
+        start=appointment.start,
+        end=appointment.end,
+        timezone=appointment.timezone,
+        customer_alias=appointment.customer_alias,
+        bench=appointment.bench,
+        source=appointment.source,
+        created_at=appointment.created_at,
+    )
+
+
 @router.get("/health", response_model=HealthResponse, tags=["system"])
 def health() -> HealthResponse:
     return HealthResponse(status="ok")
 
 
-@router.get("/v1/business", response_model=BusinessResponse, tags=["business"])
+@router.get(
+    "/v1/business",
+    response_model=BusinessResponse,
+    tags=["business"],
+    responses={503: {"model": ErrorResponse, "description": "Storage unavailable."}},
+)
 def read_business(catalog: CatalogDep, clock: ClockDep) -> BusinessResponse:
-    business = catalog.business()
+    snapshot = catalog.snapshot()
+    business = snapshot.business
     window = booking_window(business, clock())
     return BusinessResponse(
         id=business.id,
@@ -78,7 +168,7 @@ def read_business(catalog: CatalogDep, clock: ClockDep) -> BusinessResponse:
                 start=i.start.strftime("%H:%M"),
                 end=i.end.strftime("%H:%M"),
             )
-            for i in catalog.hours().intervals
+            for i in snapshot.hours.intervals
         ],
         booking_window=BookingWindowResponse(
             first_date=window.first_date, last_date=window.last_date
@@ -86,7 +176,12 @@ def read_business(catalog: CatalogDep, clock: ClockDep) -> BusinessResponse:
     )
 
 
-@router.get("/v1/services", response_model=ServicesResponse, tags=["business"])
+@router.get(
+    "/v1/services",
+    response_model=ServicesResponse,
+    tags=["business"],
+    responses={503: {"model": ErrorResponse, "description": "Storage unavailable."}},
+)
 def list_services(catalog: CatalogDep) -> ServicesResponse:
     return ServicesResponse(services=[_service_response(s) for s in catalog.services()])
 
@@ -103,14 +198,80 @@ def read_availability(
         DateOnly,
         Query(alias="date", description="Local date in the business timezone (YYYY-MM-DD)."),
     ],
-    catalog: CatalogDep,
     appointments: AppointmentsDep,
     clock: ClockDep,
 ) -> AvailabilityResponse:
-    slots = get_availability(catalog, appointments, service_id, day, clock())
+    result = query_availability(appointments, service_id, day, clock())
     return AvailabilityResponse(
         service_id=service_id,
         date=day,
-        timezone=catalog.business().timezone.key,
-        slots=[SlotResponse(start=s.start, end=s.end) for s in slots],
+        timezone=result.timezone,
+        slots=[SlotResponse(start=s.start, end=s.end) for s in result.slots],
     )
+
+
+@router.post(
+    "/v1/appointment-proposals",
+    response_model=AppointmentProposalResponse,
+    tags=["appointments"],
+    responses=_PROPOSAL_ERRORS,
+)
+def create_appointment_proposal(
+    body: AppointmentProposalRequest,
+    appointments: AppointmentsDep,
+    clock: ClockDep,
+    codec: TokenCodecDep,
+    new_id: IdFactoryDep,
+) -> AppointmentProposalResponse:
+    """Describe what booking this slot would do. Nothing is saved."""
+    review = propose_appointment(appointments, body.service_id, body.start, clock(), new_id)
+    return AppointmentProposalResponse(
+        proposal_token=codec.encode(review.proposal),
+        expires_at=review.proposal.expires_at,
+        service=_service_response(review.service),
+        start=review.proposal.start,
+        end=review.end,
+        timezone=review.timezone,
+        customer_alias=review.customer_alias,
+    )
+
+
+@router.post(
+    "/v1/appointments",
+    response_model=AppointmentResponse,
+    status_code=201,
+    tags=["appointments"],
+    responses=_CONFIRM_ERRORS,
+)
+def confirm_appointment_route(
+    body: ConfirmAppointmentRequest,
+    response: Response,
+    appointments: AppointmentsDep,
+    clock: ClockDep,
+    codec: TokenCodecDep,
+) -> AppointmentResponse:
+    """The only write. Requires a valid proposal token and an explicit `confirm: true`."""
+    proposal = codec.decode(body.proposal_token)
+    appointment, created = confirm_appointment(appointments, proposal, clock())
+    if not created:
+        response.status_code = 200
+    # Audit trail: ids and outcome only. Never the token, the alias or any submitted value.
+    logger.info(
+        "appointment_confirm outcome=%s appointment_id=%s",
+        "created" if created else "replayed",
+        appointment.id,
+    )
+    return _appointment_response(appointment)
+
+
+@router.get(
+    "/v1/appointments/{appointment_id}",
+    response_model=AppointmentResponse,
+    tags=["appointments"],
+    responses=_GET_APPOINTMENT_ERRORS,
+)
+def read_appointment(appointment_id: UUID, appointments: AppointmentsDep) -> AppointmentResponse:
+    appointment = appointments.get(appointment_id)
+    if appointment is None:
+        raise AppointmentNotFound
+    return _appointment_response(appointment)

@@ -4,7 +4,12 @@ Portfolio project exploring how a voice-enabled AI agent can handle realistic bu
 
 ## Status
 
-Foundation milestone implemented ([plan](docs/plans/0001-project-foundation.md)): a FastAPI backend with deterministic availability for a fictional bicycle workshop, and a Next.js page that shows its services, opening hours, and open appointment times. The page is read-only. The agent, voice, persistence, and appointment changes are not built yet.
+Two milestones are implemented:
+
+- Foundation ([plan](docs/plans/0001-project-foundation.md)): a FastAPI backend with deterministic availability for a fictional bicycle workshop, and a Next.js page that shows its services, opening hours, and open appointment times.
+- Booking with explicit confirmation ([plan](docs/plans/0002-booking-persistence.md)): pick an open time, review exactly what will be booked, and confirm it explicitly. Confirmation re-checks availability transactionally, assigns one of two benches, is idempotent, and detects a changed catalog or a taken slot without writing. It runs in memory today; the PostgreSQL (Supabase) adapter, migrations and integration tests are written but have not yet been run against a real project, which needs steps that only the project owner can approve (see the plan's gates).
+
+The agent, voice, authentication, rescheduling, and cancellation are not built yet.
 
 ## Start here
 
@@ -28,7 +33,7 @@ pnpm install
 pnpm dev
 ```
 
-The business, services, and seeded bookings are fictional and held in memory. The web app reads the API address from `API_BASE_URL` (default `http://127.0.0.1:8000`).
+The business, services, and seeded bookings are fictional. By default (`APPOINTMENT_STORE=memory`) they and any bookings you make are held in memory and reset when the API restarts. The web app reads the API address from `API_BASE_URL` (default `http://127.0.0.1:8000`). Database setup and secrets are covered in [docs/HARNESS.md](docs/HARNESS.md).
 
 ## Proposed MVP
 

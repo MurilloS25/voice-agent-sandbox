@@ -36,6 +36,17 @@ export function describeError(code: string, message: string): string {
       return "Choose a service and a valid date, then try again.";
     case "date_out_of_range":
       return message;
+    case "slot_unavailable":
+      return "That time was just taken. Choose another time.";
+    case "slot_not_offered":
+      return "That start time isn't offered. Choose an open time from the list.";
+    case "proposal_invalid":
+    case "proposal_expired":
+      return "That booking review is no longer valid. Choose the time again.";
+    case "proposal_stale":
+      return "The service details changed since you reviewed this booking. Review it again.";
+    case "appointment_not_found":
+      return "We couldn't find that appointment.";
     default:
       return "The schedule service returned an error. Try again in a moment.";
   }

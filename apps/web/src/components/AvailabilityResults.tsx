@@ -38,6 +38,7 @@ export async function AvailabilityResults({
   return (
     <SlotList
       availability={result.data}
+      serviceId={serviceId}
       serviceName={serviceName}
       shopClosed={shopClosed}
     />

@@ -2,8 +2,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from tests.support import NOW
+from voice_agent_api.factory import create_app
 from voice_agent_api.infrastructure.seed import build_seed
-from voice_agent_api.main import create_app
 
 
 def make_app() -> FastAPI:

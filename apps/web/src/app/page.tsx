@@ -8,11 +8,7 @@ import { OpeningHours } from "@/components/OpeningHours";
 import { ServiceList } from "@/components/ServiceList";
 import { SlotsSkeleton } from "@/components/Skeletons";
 import { getBusinessOverview } from "@/lib/api/client";
-
-function firstValue(value: string | string[] | undefined): string | undefined {
-  const single = Array.isArray(value) ? value[0] : value;
-  return single ? single : undefined;
-}
+import { firstValue } from "@/lib/search-params";
 
 export default async function Home(props: PageProps<"/">) {
   const searchParams = await props.searchParams;
