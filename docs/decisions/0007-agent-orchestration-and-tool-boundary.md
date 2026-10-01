@@ -48,6 +48,7 @@ The pool's threads are not daemons, so a call still blocked at process exit can 
 - Retries are safe while the process is up; a restart loses conversations (later turns get 404, the web shows "start a new conversation").
 - The system prompt is rebuilt each turn from a fresh catalog read and the conversation's structured state, so tool results are not replayed across turns.
 - Provider adapters, live evaluation and the web chat are separate phases (3B, 3C).
+- Accepted residual risks for a single-process demo: there is no rate limit or spend cap on `POST /v1/agent/turns` (four turns in flight at most, but a script can use up the provider quota; required before any public deployment); creating many conversations evicts the oldest idle ones, so one visitor can expire others' conversations; a committed turn cannot clear the pending-review summary, which is only guarded by its expiry; and whether the visitor really chose a slot is enforced by the prompt, while the code enforces only that the slot came from an earlier turn (a review is still only a proposal that needs the visitor's button press).
 
 ## Alternatives considered
 

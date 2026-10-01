@@ -21,7 +21,7 @@ Version-controlled conversation scenarios for the text agent (plan 0003).
 }
 ```
 
-- `script` is what a model would say. It is used by the **offline** runner (`apps/api/tests/evals/test_offline_scenarios.py`), which replays it through the real orchestrator, tools, validation and store. It checks the application's guarantees, not model quality. A live run (a later phase) ignores `script` and uses `user` and `expect` only.
+- `script` is what a model would say. It is used by the **offline** runner (`apps/api/tests/evals/test_offline_scenarios.py`), which replays it through the real orchestrator, tools, validation and store. It checks the application's guarantees, not model quality. A live run ignores `script` and uses `user` and `expect` only.
 - `before` actions change the fictional world between turns. `fill_slot` fills every bench for a slot through the domain's own propose and confirm commands, standing in for other customers.
 - `expect` keys: `outcome`, `tools_called_in_order` (the allow-listed tools that actually ran), `tool_result_codes` (`null` for success), `guardrails` (events, in order), `review_ready`, `reply_should_mention_any` (case-insensitive substrings), `reply_must_not_match` (case-insensitive regular expressions), `claims_no_booking` (the reply must not say a booking is made, confirmed or saved; negations such as "nothing is booked" are fine).
 
