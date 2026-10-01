@@ -38,11 +38,12 @@ from voice_agent_api.config import ConfigError, load_settings
 
 pytestmark = pytest.mark.provider
 
-# Tokens already counted: the C4 smoke, the two partial C5 runs and the completed run that scored
-# 10 of 12 on the primary model plus its comparison subset (96,954 in all; the second partial run's
-# share is an upper bound that includes an estimate for its failed call). The ceiling is the hard
-# limit set for the final model-selection attempt.
-PRIOR_TOKENS = 96_954
+# Tokens already counted, 151,528 in all: the C4 smoke, the two partial C5 runs and the run that
+# scored 10 of 12 with its comparison subset (96,954 together; the second partial run's share is an
+# upper bound that includes an estimate for its failed call), the 12 of 12 final attempt (47,943)
+# and the real-provider browser check (6,631). The ceiling is the hard limit set for the final
+# model-selection attempt; a new live run needs its own approval and ceiling.
+PRIOR_TOKENS = 151_528
 DAILY_CEILING = 175_000
 PER_MINUTE_TARGET = 7_000
 

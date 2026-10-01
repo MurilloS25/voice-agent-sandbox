@@ -361,7 +361,8 @@ def test_the_base_url_is_pinned_and_ignores_ambient_environment_variables(
 
 
 @pytest.mark.parametrize(
-    "variable", ["LANGSMITH_TRACING", "LANGSMITH_TRACING_V2", "LANGCHAIN_TRACING_V2"]
+    "variable",
+    ["LANGSMITH_TRACING", "LANGSMITH_TRACING_V2", "LANGCHAIN_TRACING_V2", "LANGCHAIN_TRACING"],
 )
 def test_a_host_that_enables_tracing_fails_startup_naming_only_the_variable(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, variable: str
