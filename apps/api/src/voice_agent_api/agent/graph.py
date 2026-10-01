@@ -161,6 +161,10 @@ def build_graph(deps: GraphDeps) -> CompiledStateGraph[Any, Any, Any, Any]:
         assert isinstance(last, AIMessage)
         results: list[ToolMessage] = []
         executed = state["tool_calls"]
+        if any(call["name"] == "find_available_slots" for call in last.tool_calls) or any(
+            call.get("name") == "find_available_slots" for call in last.invalid_tool_calls
+        ):
+            workspace.search_attempted = True  # before any call in this message runs
 
         for index, invalid in enumerate(last.invalid_tool_calls):
             call_id = invalid.get("id") or f"invalid_{index}"
@@ -193,11 +197,12 @@ def build_graph(deps: GraphDeps) -> CompiledStateGraph[Any, Any, Any, Any]:
             executed += 1
             started = time.monotonic()
             now = deps.clock()
-            offered = workspace.offered
+            offered = workspace.reviewable  # never this turn's own search results
+            searched = workspace.search_attempted or workspace.offered_changed
             try:
                 outcome: ToolOutcome = deps.caller.call(
                     # Arguments are bound now: an abandoned call sees only these values.
-                    partial(deps.tools.run, name, args, offered, now),
+                    partial(deps.tools.run, name, args, offered, now, searched),
                     limit_s=limits.tool_timeout_s,
                     deadline=deps.deadline,
                     min_start_s=limits.min_call_start_s,

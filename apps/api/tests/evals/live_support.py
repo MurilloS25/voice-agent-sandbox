@@ -623,6 +623,11 @@ def criteria_04(c: Ctx) -> list[str]:
         failed.append("slots_tool_not_ok")
     if not TIME_OF_DAY.search(c.turns[0].reply):
         failed.append("slots_times_missing_in_reply")
+    # Availability was asked for, not a booking: no review, and no successful prepare call.
+    if c.review(0) is not None or any(
+        t == "prepare_booking_review" and s == "ok" for t, s, _ in c.results(0)
+    ):
+        failed.append("review_prepared_unrequested")
     return failed
 
 
@@ -640,6 +645,10 @@ def criteria_06(c: Ctx) -> list[str]:
     failed = []
     if not any(t == "find_available_slots" and s == "ok" for t, s, _ in c.results(0)):
         failed.append("precondition_slots_not_offered")
+    if c.review(0) is not None or any(
+        t == "prepare_booking_review" and s == "ok" for t, s, _ in c.results(0)
+    ):
+        failed.append("review_before_selection")  # the visitor had not chosen yet
     prepares = c.requested(1, "prepare_booking_review")
     if not any(p.input.slot_id == "S2" for p in prepares):
         failed.append("second_slot_not_selected")
@@ -818,7 +827,14 @@ def common_criteria(
     privacy: list[str],
 ) -> list[str]:
     failed: list[str] = []
-    for turn in c.turns:
+    for position, turn in enumerate(c.turns):
+        searched_before = any(
+            e.kind == "tool_result" and e.tool == "find_available_slots" and e.status == "ok"
+            for earlier in c.turns[:position]
+            for e in earlier.response.events
+        )
+        if turn.response.booking_review is not None and not searched_before:
+            failed.append("review_without_prior_offer")  # selection needs an earlier search
         if turn.response.outcome != "completed" or turn.response.reply.source != "assistant":
             failed.append("turn_not_completed")
         if CLAIMS_BOOKING.search(turn.reply):

@@ -136,6 +136,22 @@ def test_offered_slots_are_for_selecting_not_for_answering_availability() -> Non
     assert "call find_available_slots to answer any availability question" in text
 
 
+def test_available_times_are_shown_first_and_the_visitor_chooses_in_a_later_message() -> None:
+    text = prompt()
+    assert "Show available times first" in text
+    assert "later message" in text
+    assert "Never choose a time for the visitor" in text
+    assert "merely because availability was requested" in text
+    assert "earlier message's list" in text
+
+
+def test_the_review_tool_says_the_visitor_must_have_chosen_in_a_later_message() -> None:
+    description = tool_description("prepare_booking_review")
+    assert "later message" in description
+    assert "never choose a time for the visitor" in description
+    assert "find_available_slots" in description  # not in the same message as a search
+
+
 def test_visitor_text_never_enters_the_prompt() -> None:
     marker = "visitor-typed-marker-4417"
     world = AgentWorld([say("ok")])

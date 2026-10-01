@@ -828,3 +828,85 @@ def test_the_acceptance_rule_is_documented_where_the_checker_lives() -> None:
     doc = live_support.price_association_failures.__doc__ or ""
     for term in ("segment", "exact price", "ambiguous", "unrelated list"):
         assert term in doc
+
+
+# -- selection happens in a later turn (scenarios 4 and 6) ----------------------------------------
+
+
+def two_turns() -> tuple[Any, Any, Any]:
+    """A world where a search was answered in one turn and a time chosen in the next."""
+    from uuid import uuid4
+
+    from tests.evals.live_support import build_world, run_turn
+
+    model = ScriptedChatModel(
+        [
+            call_tools(FIND),
+            say("S1 is 09:00 and S2 is 09:30."),
+            call_tools(("prepare_booking_review", {"slot_id": "S2"})),
+            say("Review below."),
+        ]
+    )
+    world = build_world(model)
+    conversation = uuid4()
+    ids: list[str] = []
+    with LogCapture() as capture:
+        search = run_turn(world, capture, conversation, 1, "times?", ids)
+        chosen = run_turn(world, capture, conversation, 2, "the second one", ids)
+    world.service.close()
+    return world, search, chosen
+
+
+def test_scenario_four_passes_when_the_model_only_lists_times() -> None:
+    report, _ = run([4], [call_tools(FIND), say("There is room at 09:00 and 09:30.")])
+    assert report.results[0].passed, report.results[0].failed
+
+
+def test_scenario_four_passes_when_a_same_turn_selection_attempt_was_rejected() -> None:
+    steps: list[Any] = [
+        call_tools(FIND),
+        call_tools(("prepare_booking_review", {"slot_id": "S1"})),
+        say("There is room at 09:00 and 09:30. Tell me which you would like."),
+    ]
+    report, _ = run([4], steps)
+    result = report.results[0]
+    assert result.passed, result.failed
+    assert result.tools == [["find_available_slots", "prepare_booking_review"]]  # attempted
+
+
+def test_scenario_four_fails_if_a_review_was_prepared_unrequested() -> None:
+    from tests.evals.live_support import Ctx, criteria_04
+
+    world, _, chosen = two_turns()
+    # The review turn, presented as if it answered the availability question itself.
+    assert "review_prepared_unrequested" in criteria_04(Ctx([chosen], world))
+
+
+def test_scenario_six_requires_the_review_to_come_after_the_later_selection() -> None:
+    from tests.evals.live_support import Ctx, criteria_06
+
+    world, search, chosen = two_turns()
+    assert criteria_06(Ctx([search, chosen], world)) == []
+    # A review already in the first turn means the visitor had not chosen yet.
+    assert "review_before_selection" in criteria_06(Ctx([chosen, chosen], world))
+
+
+def test_a_review_with_no_earlier_search_fails_for_any_scenario() -> None:
+    from tests.evals.live_support import Ctx, common_criteria
+
+    world, search, chosen = two_turns()
+    assert "review_without_prior_offer" not in common_criteria(
+        Ctx([search, chosen], world), privacy=[]
+    )
+    assert "review_without_prior_offer" in common_criteria(Ctx([chosen], world), privacy=[])
+
+
+def test_scenario_six_passes_end_to_end_with_a_later_selection() -> None:
+    steps: list[Any] = [
+        call_tools(FIND),
+        say("S1 is 09:00 and S2 is 09:30."),
+        call_tools(("prepare_booking_review", {"slot_id": "S2"})),
+        say("The review is below; nothing is booked until you press Confirm booking."),
+    ]
+    report, _ = run([6], steps)
+    assert report.results[0].passed, report.results[0].failed

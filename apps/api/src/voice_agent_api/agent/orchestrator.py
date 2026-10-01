@@ -139,7 +139,9 @@ class AgentService:
     ) -> tuple[AgentTurnResponse, ConversationUpdate, "_Stats"]:
         events = EventLog(self._clock)
         events.user_message(request.message)
-        workspace = TurnWorkspace(offered=accepted.snapshot.offered)
+        workspace = TurnWorkspace(
+            reviewable=accepted.snapshot.offered, offered=accepted.snapshot.offered
+        )
         stats = _Stats()
         limits = self._limits
         deadline = Deadline.after(limits.turn_deadline_s, self._monotonic)
@@ -244,7 +246,11 @@ class AgentService:
             appended.append(HistoryEntry("assistant", reply.text))
         update = ConversationUpdate(
             history_append=tuple(appended),
-            offered=workspace.offered if workspace.offered_changed else None,
+            # Slots become reviewable only when the visitor was actually shown them: a degraded
+            # turn (a system notice, not the assistant's answer) promotes nothing.
+            offered=workspace.offered
+            if workspace.offered_changed and reply.source == "assistant"
+            else None,
             pending_review=review.pending if review is not None else None,
         )
         return response, update

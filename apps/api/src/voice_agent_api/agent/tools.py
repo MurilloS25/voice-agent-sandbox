@@ -18,7 +18,7 @@ from typing import Annotated, Any, Literal
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, ValidationError, WithJsonSchema
 
 from voice_agent_api.agent.contracts import ToolInput
 from voice_agent_api.agent.formatting import WEEKDAYS, local_parts, price_display
@@ -39,7 +39,10 @@ from voice_agent_api.domain.ports import AppointmentBook, BusinessCatalog
 from voice_agent_api.domain.queries import query_availability
 
 _DATE_ONLY = re.compile(r"\d{4}-\d{2}-\d{2}")
-_CLOCK_TIME = re.compile(r"([01]\d|2[0-3]):[0-5]\d")
+# Exactly HH:MM on a 24-hour clock. The same pattern validates the input and is what the provider
+# sees: a `time` annotation alone would publish `format: "time"`, which means HH:MM:SS.
+CLOCK_TIME_PATTERN = r"^([01]\d|2[0-3]):[0-5]\d$"
+_CLOCK_TIME = re.compile(CLOCK_TIME_PATTERN)
 
 
 def _date_only(value: object) -> object:
@@ -55,7 +58,11 @@ def _clock_time(value: object) -> object:
 
 
 DateOnly = Annotated[date, BeforeValidator(_date_only)]
-ClockTime = Annotated[time, BeforeValidator(_clock_time)]
+ClockTime = Annotated[
+    time,
+    BeforeValidator(_clock_time),
+    WithJsonSchema({"type": "string", "pattern": CLOCK_TIME_PATTERN}),
+]
 
 
 class _Args(BaseModel):
@@ -128,8 +135,10 @@ TOOLS: dict[str, ToolSpec] = {
         ),
         ToolSpec(
             "prepare_booking_review",
-            "Prepare a booking review for an offered slot. Books nothing: the visitor confirms "
-            "with a button.",
+            "Prepare a booking review for a time the visitor chose in a later message than the one "
+            "that showed it. Never call it in the same message as find_available_slots or merely "
+            "because availability was requested, and never choose a time for the visitor. Books "
+            "nothing: the visitor confirms with a button.",
             PrepareBookingReviewArgs,
         ),
     )
@@ -245,7 +254,12 @@ class ToolExecutor:
         self._limits = limits
 
     def run(
-        self, name: str, args: _Args, offered: tuple[OfferedSlot, ...], now: datetime
+        self,
+        name: str,
+        args: _Args,
+        offered: tuple[OfferedSlot, ...],
+        now: datetime,
+        searched_this_turn: bool = False,
     ) -> ToolOutcome:
         try:
             if name == "get_business_info":
@@ -255,7 +269,7 @@ class ToolExecutor:
             if isinstance(args, FindAvailableSlotsArgs):
                 return self._find_slots(args, now)
             if isinstance(args, PrepareBookingReviewArgs):
-                return self._prepare_review(args, offered, now)
+                return self._prepare_review(args, offered, now, searched_this_turn)
         except ServiceNotFound:
             return _rejected("service_not_found", "No service matches that id.")
         except DateOutsideBookingWindow as exc:
@@ -398,8 +412,20 @@ class ToolExecutor:
         )
 
     def _prepare_review(
-        self, args: PrepareBookingReviewArgs, offered: tuple[OfferedSlot, ...], now: datetime
+        self,
+        args: PrepareBookingReviewArgs,
+        offered: tuple[OfferedSlot, ...],
+        now: datetime,
+        searched_this_turn: bool,
     ) -> ToolOutcome:
+        if searched_this_turn:
+            # Times shown in this turn cannot be chosen in it: the visitor chooses in a later
+            # message, and the assistant never chooses for them. Nothing is proposed or signed.
+            return _rejected(
+                "slot_not_offered",
+                "Times shown in this message can be chosen in the visitor's next message.",
+                note="Show the times and wait for the visitor to choose one in a later message.",
+            )
         slot = next((s for s in offered if s.slot_id == args.slot_id), None)
         if slot is None:
             return _rejected(

@@ -89,8 +89,16 @@ class TurnWorkspace:
     """Mutable working copy for one accepted turn. Only the turn's own thread touches it;
     abandoned calls never receive it."""
 
+    # Slots offered in a previously committed turn: the only ones a review may be prepared for.
+    reviewable: tuple[OfferedSlot, ...]
+    # Slots shown to the visitor in this turn. They are committed with the turn and become
+    # reviewable only from the next one, so a search and a selection can never share a turn.
     offered: tuple[OfferedSlot, ...]
     offered_changed: bool = False
+    # A search was requested in this turn (successful or not, even one later in the same model
+    # message). From then on nothing can be reviewed in this turn: a failed or rejected search
+    # must not leave the assistant free to choose from the previous list.
+    search_attempted: bool = False
     review: PreparedReview | None = None
     input_tokens: int = 0
     output_tokens: int = 0
