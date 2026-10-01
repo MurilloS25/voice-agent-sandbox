@@ -21,8 +21,6 @@ import sys
 import pytest
 
 from tests.evals.live_support import (
-    COMPARISON_MODEL,
-    COMPARISON_SCENARIOS,
     OPT_IN_VARIABLE,
     PRIMARY_MODEL,
     HttpProbe,
@@ -40,10 +38,12 @@ from voice_agent_api.config import ConfigError, load_settings
 
 pytestmark = pytest.mark.provider
 
-# Tokens already counted: the C4 smoke (2,051), the first partial C5 run (14,334) and the second
-# partial C5 run (16,476, an upper bound that includes an estimate for its failed call).
-PRIOR_TOKENS = 32_861
-DAILY_CEILING = 180_000
+# Tokens already counted: the C4 smoke, the two partial C5 runs and the completed run that scored
+# 10 of 12 on the primary model plus its comparison subset (96,954 in all; the second partial run's
+# share is an upper bound that includes an estimate for its failed call). The ceiling is the hard
+# limit set for the final model-selection attempt.
+PRIOR_TOKENS = 96_954
+DAILY_CEILING = 175_000
 PER_MINUTE_TARGET = 7_000
 
 
@@ -72,10 +72,8 @@ def test_live_agent_evaluation(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     reports = []
     with LogCapture() as capture:
-        for model_name, numbers in (
-            (PRIMARY_MODEL, tuple(range(1, 13))),
-            (COMPARISON_MODEL, COMPARISON_SCENARIOS),
-        ):
+        # The final attempt runs the primary model only; the comparison model is not run again.
+        for model_name, numbers in ((PRIMARY_MODEL, tuple(range(1, 13))),):
             model = build_chat_model(settings.model_copy(update={"agent_model": model_name}))
             assert model is not None
             probe = HttpProbe()
