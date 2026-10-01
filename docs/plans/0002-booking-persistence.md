@@ -73,7 +73,7 @@ pnpm test               # 151 passed
 pnpm build
 ```
 
-Also run: an end-to-end smoke test against the real API (memory mode) and the production web build, driving the real Server Action through the form's progressive-enhancement POST. It covered: review writes nothing, confirm redirects to a persisted appointment, a repeated confirm returns the same appointment, a third confirm of a full two-bench slot shows the conflict, malformed and missing selections, an unknown appointment, a tampered token (not booked), and the unavailable notice with the API stopped. That run found and fixed a crash on a malformed `start` value.
+Also run: an end-to-end smoke test against the real API (memory mode) and the production web build, driving the real Server Action through the form's progressive-enhancement POST. It covered: review writes nothing, confirm redirects to a persisted appointment, a repeated confirm of the same review returns the same appointment, a third confirm of a full two-bench slot shows the conflict, malformed and missing selections, an unknown appointment, a tampered token (not booked), and the unavailable notice with the API stopped. That run found and fixed a crash on a malformed `start` value.
 
 Reviewed: a read-only review of the whole diff (confirmation integrity, privacy, concurrency, contract) found no blockers. It found, and this change fixed: a replayed or re-read appointment showing catalog values that were never saved (appointments now store a snapshot of the booked service name, price and timezone, and the response is rendered from that row alone), a `slot_not_offered` confirm shown as a retryable error, a "not confirmed" claim for outcomes that are really unknown, a post-commit catalog read that could turn a successful booking into a 5xx, a wrong timeout budget (see above), missing TCP-level connection timeouts, `/book` making three API calls per view, `.env` files created world-readable, a loose fictional-phone check, and benches numbered with gaps. It also showed that app logging was never configured when run under uvicorn, and that the audit log recorded a submitted id; both are fixed and tested.
 
@@ -81,8 +81,8 @@ Real-database and real-stack verification (done after the gates):
 
 - `python -m uv run pytest -m integration`: 15 passed.
 - API in PostgreSQL mode behind the production web build, driven over HTTP: 107 checks. The catalog and availability come from the database; a review writes nothing; a confirmation creates one `web_demo` appointment and repeats are idempotent; the appointment survives an API restart; two benches fill exactly once and a competing confirmation is refused with no overlap; tampered, malformed, expired, stale, derived-field and not-offered tokens write nothing; an API outage shows the fixed notice and the same review can be retried; no secret, token or database detail appears in any page, header, script, build asset or log.
-- Scripted headless-browser review (JavaScript on, `localhost` only, throwaway profile): 75 checks covering the full booking flow, keyboard and focus, the pending and disabled button and a double click, refresh and Back, the conflict, tampered, expired, stale, not-offered and unavailable states, layout at 1440, 390 and 320 px and at 200% text with no horizontal overflow, axe-core (including colour contrast) with no violations, no console errors, and no secret in anything the browser received. It found one defect, which is fixed and covered by tests: at 320 px with 200% text the display headings were wider than the screen and made the page scroll sideways.
-- `supabase db advisors --type security` and `--type performance`: no issues.
+- Scripted headless-browser review (JavaScript on, `localhost` only, throwaway profile): 75 checks covering the full booking flow, keyboard and focus, the pending and disabled button and a double click, refresh and Back, the conflict, tampered, expired, stale, not-offered and unavailable states, layout at 1440, 390 and 320 px and at 200% text with no horizontal overflow (the Back check only confirmed that Back shows a fresh review which writes nothing until confirmed; it did not confirm that fresh review, see the limitation in ADR 0004), axe-core (including colour contrast) with no violations, no console errors, and no secret in anything the browser received. It found one defect, which is fixed and covered by tests: at 320 px with 200% text the display headings were wider than the screen and made the page scroll sideways.
+- `supabase db advisors --linked --type security` and `--type performance`: no issues.
 
 The 40 px height of the open-time links on phones is above the WCAG 2.2 AA minimum (24 px) but below the 44 px platform guideline; it is left as is.
 
@@ -93,6 +93,7 @@ Recorded: ADRs 0002 (direct Postgres, private schema, threadpool and timeouts), 
 Deferred:
 
 - Cancel and reschedule.
+- Cross-proposal deduplication by visitor identity. Idempotency is per proposal, so Back to a fresh review and confirming it can create a second appointment (ADR 0004).
 - Retention and cleanup of test or demo rows (pg_cron).
 - Server-side SSL enforcement on the Supabase project (needs a database reboot, so the owner chooses the moment).
 - Rate limiting, required before any public deployment.

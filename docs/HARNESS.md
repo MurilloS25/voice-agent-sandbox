@@ -62,7 +62,7 @@ Everything here changes a remote project or creates a secret, so each step waits
 | Link (local config only) | `pnpm dlx supabase@2.119.0 link --project-ref <ref>` | Prompts for the postgres password. Never pass it as a flag. |
 | Read-only checks | `pnpm dlx supabase@2.119.0 migration list`, `psql --version` | None. Also check `select version()` and that `btree_gist` is available. |
 | Preview, then apply | `pnpm dlx supabase@2.119.0 db push --dry-run`, then `db push` | **Remote mutation.** |
-| Advisors | `pnpm dlx supabase@2.119.0 db advisors --type security`, then `--type performance` | Read-only. Expect no ERROR or WARN for `booking.*`. |
+| Advisors | `pnpm dlx supabase@2.119.0 db advisors --linked --type security`, then `--linked --type performance` | Read-only. Expect no ERROR or WARN for `booking.*`. |
 | Generate secrets | `python -m uv run python -m voice_agent_api.devtools.secrets generate` | Creates `apps/api/.env` locally. |
 | Set the role password | In `psql` as `postgres.<ref>` on the session pooler: `\password voice_agent_api`, paste `DB_PASSWORD` from `.env` at the hidden prompt, then `alter role voice_agent_api login;` | **Remote mutation.** Never use the Supabase SQL Editor for passwords. |
 | Check connectivity | `python -m uv run python -m voice_agent_api.devtools.secrets check --connect` | Prints pass or fail only. |
@@ -73,7 +73,7 @@ Verifying against the real database (done once for Milestone 2; repeat after DB-
 
 1. `python -m uv run pytest -m integration` (15 tests; creates and deletes only `source = 'test'` rows, and leaves none behind).
 2. With `APPOINTMENT_STORE=postgres`, `python -m uv run python -m voice_agent_api.demo_reset --yes` deletes only `seed` and `web_demo` rows and inserts the four fictional seed bookings. Afterwards the counts by source should be `seed = 4` and nothing else.
-3. Start the API and `pnpm build && pnpm start` in `apps/web`, then repeat the smoke test above. Also check that a review writes nothing, that confirming twice yields one appointment, that a full slot shows the conflict, and that stopping the API shows the unavailable notice and a retry works.
+3. Start the API and `pnpm build && pnpm start` in `apps/web`, then repeat the smoke test above. Also check that a review writes nothing, that confirming the same review (the same proposal token) twice yields one appointment (two separate reviews are not deduplicated; see ADR 0004), that a full slot shows the conflict, and that stopping the API shows the unavailable notice and a retry works.
 4. For a browser check, drive a headless Chromium-based browser over the DevTools protocol against `localhost` with a throwaway profile (no extensions, no signed-in profile), keeping screenshots outside the repository. Check at 1440, 390 and 320 px and at 200% text: no horizontal scroll, axe-core clean, keyboard order and focus, no console errors. The scripts used for Milestone 2 are not committed.
 5. Run `demo_reset --yes` again, and confirm there are no `test` rows.
 

@@ -23,6 +23,12 @@ A booking must be created only after the user has seen exactly what will happen 
 - A signing key is a server secret, validated at startup (see ADR 0006). Rotating it invalidates outstanding reviews, which is acceptable for 10-minute tokens.
 - The catalog is read per request, so a catalog change is detected immediately rather than at the next restart.
 
+## Known limitation: idempotency is per proposal, not per visitor
+
+- Idempotency is scoped to a proposal id (the token). Double clicks, retries after a timeout and replays of the same review always return the one appointment.
+- Reloading the review page, or navigating Back to it, generates a fresh review with a new proposal id. Confirming that fresh review can create a second appointment if a bench is still free. This is not the same token producing a duplicate, and a confirmed booking does not disappear.
+- With no user identity, account ownership or business idempotency key, the system cannot tell that two proposals came from the same visitor. Cross-proposal deduplication by identity is deferred to a later milestone.
+
 ## Alternatives considered
 
 - **A persisted pending hold:** reserves capacity but needs expiry sweeps, and abandoned holds block slots.

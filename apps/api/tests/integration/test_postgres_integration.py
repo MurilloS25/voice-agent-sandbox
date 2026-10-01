@@ -126,10 +126,21 @@ def test_the_catalog_matches_the_in_memory_seed(
 ) -> None:
     catalog, _ = stores(db, pg_settings)
     snapshot = catalog.snapshot("flat-repair")
-    assert snapshot.business == BUSINESS
-    assert snapshot.hours == HOURS
-    assert tuple(catalog.services()) == SERVICES
-    assert snapshot.service == SERVICES[0]
+
+    # Reduce every comparison to a named boolean first, so a failing assertion can never print a
+    # Business, Service or hours repr.
+    business_matches = snapshot.business == BUSINESS
+    hours_match = snapshot.hours == HOURS
+    services_match = tuple(catalog.services()) == SERVICES
+    service_match = snapshot.service == SERVICES[0]
+    summary = (
+        f"business_matches={business_matches} hours_match={hours_match} "
+        f"services_match={services_match} service_match={service_match}"
+    )
+    assert business_matches, summary
+    assert hours_match, summary
+    assert services_match, summary
+    assert service_match, summary
 
 
 # --- booking, idempotency and concurrency --------------------------------------------------
@@ -145,15 +156,34 @@ def test_confirm_persists_replays_and_reads_back(
     appointment, created = confirm_appointment(book, proposal, TEST_NOW, source=SOURCE)
     replay, replayed_created = confirm_appointment(book, proposal, TEST_NOW, source=SOURCE)
 
-    assert created and not replayed_created
-    assert replay == appointment
-    assert appointment.bench == 1
-    assert appointment.end - appointment.start == timedelta(minutes=30)
-    assert appointment.start == start
-    assert appointment.status == "confirmed" and appointment.source == SOURCE
-    assert appointment.customer_alias.startswith("Demo ")
-    assert book.get(appointment.id) == appointment
-    assert count_test_rows(db) == 1
+    # Reduce everything to booleans and counts before asserting, so a failure can never print an
+    # Appointment, an identifier, an alias or a timestamp.
+    first_created = created is True
+    replay_not_created = replayed_created is False
+    replay_matches = replay == appointment
+    readback_matches = book.get(appointment.id) == appointment
+    bench_is_first = appointment.bench == 1
+    duration_matches = appointment.end - appointment.start == timedelta(minutes=30)
+    start_matches = appointment.start == start
+    status_and_source_match = appointment.status == "confirmed" and appointment.source == SOURCE
+    alias_is_demo = appointment.customer_alias.startswith("Demo ")
+    rows = count_test_rows(db)
+    summary = (
+        f"first_created={first_created} replay_not_created={replay_not_created} "
+        f"replay_matches={replay_matches} readback_matches={readback_matches} "
+        f"bench_is_first={bench_is_first} duration_matches={duration_matches} "
+        f"start_matches={start_matches} status_and_source_match={status_and_source_match} "
+        f"alias_is_demo={alias_is_demo} rows={rows}"
+    )
+    assert first_created and replay_not_created, summary
+    assert replay_matches, summary
+    assert bench_is_first, summary
+    assert duration_matches, summary
+    assert start_matches, summary
+    assert status_and_source_match, summary
+    assert alias_is_demo, summary
+    assert readback_matches, summary
+    assert rows == 1, summary
 
 
 def test_racing_proposals_for_one_slot_create_exactly_one_per_bench(

@@ -27,7 +27,7 @@ psycopg's pool is synchronous, and async psycopg does not work with Windows' def
 - A single, small trust path: browser → Next.js server → FastAPI → PostgreSQL. No database credential can reach the browser.
 - The synchronous pool needs the threadpool discipline above, and the pool size (default 5) must stay below the threadpool's limit.
 - Direct connections are IPv6-only without a paid add-on, so this uses the IPv4 session pooler. Moving to serverless hosting would mean switching to transaction mode, which is why prepared statements are already disabled.
-- The database is only exercised end to end after a Supabase project exists. Until then the adapter is covered by offline tests with a scripted fake pool.
+- The adapter keeps offline unit coverage with a scripted fake pool. It has also been exercised against a real database: the migrations were applied to a dedicated Supabase development project, the 15 PostgreSQL integration tests pass against it, and the production web and API path was run against PostgreSQL. The credentials and connection settings for that project stay outside the repository (a git-ignored `.env` and an external CA certificate).
 
 ## Alternatives considered
 
