@@ -194,6 +194,18 @@ def _rejected(code: str, summary: str, **extra: Any) -> ToolOutcome:
     )
 
 
+def _slot_unavailable(slot: OfferedSlot | None = None) -> ToolOutcome:
+    """The chosen time was taken. The model must say so and refresh the same search, which is
+    identified from the slot's committed state (service id and local date), not from any text."""
+    extra: dict[str, Any] = {
+        "required_notice": "That time is no longer available.",
+        "next_action": "find_available_slots",
+    }
+    if slot is not None:
+        extra["search"] = {"service_id": slot.service_id, "date": slot.local_date}
+    return _rejected("slot_unavailable", "That time was just taken.", **extra)
+
+
 @dataclass(frozen=True)
 class PromptFacts:
     """What the system prompt is built from. Read through a bounded call."""
@@ -271,7 +283,13 @@ class ToolExecutor:
             if isinstance(args, PrepareBookingReviewArgs):
                 return self._prepare_review(args, offered, now, searched_this_turn)
         except ServiceNotFound:
-            return _rejected("service_not_found", "No service matches that id.")
+            # Fixed text only: the submitted service string is never echoed back to the model.
+            return _rejected(
+                "service_not_found",
+                "That service is not offered.",
+                message="The requested service is not offered.",
+                next_action="list_services",
+            )
         except DateOutsideBookingWindow as exc:
             return _rejected(
                 "date_out_of_range",
@@ -282,7 +300,7 @@ class ToolExecutor:
         except SlotNotOffered:
             return _rejected("slot_not_offered", "That time is not offered.")
         except SlotUnavailable:
-            return _rejected("slot_unavailable", "That time was just taken.")
+            return _slot_unavailable()
         except StorageUnavailable:
             return ToolOutcome(
                 "error",
@@ -431,9 +449,13 @@ class ToolExecutor:
             return _rejected(
                 "slot_not_offered", "That slot id was not offered in this conversation."
             )
-        review = propose_appointment(
-            self._appointments, slot.service_id, slot.start, now, self._new_id
-        )
+        try:
+            review = propose_appointment(
+                self._appointments, slot.service_id, slot.start, now, self._new_id
+            )
+        except SlotUnavailable:
+            # The service and date come from the committed slot, never from the visitor's text.
+            return _slot_unavailable(slot)
         tz = ZoneInfo(review.timezone)
         local_date, _, local_start = local_parts(review.proposal.start, tz)
         _, _, local_end = local_parts(review.end, tz)

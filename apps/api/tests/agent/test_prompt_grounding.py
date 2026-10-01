@@ -20,8 +20,9 @@ from voice_agent_api.agent.tools import TOOLS, read_prompt_facts, tool_specs
 from voice_agent_api.infrastructure.seed import SERVICES, build_seed
 
 # Characters, as a stand-in for tokens (about four per token). The measured sizes at the time of
-# writing were 2,053 for the prompt and 2,475 for the tool schemas, with the seed catalog.
-MAX_PROMPT_CHARS = 2_600
+# writing were 2,053 for the prompt and 2,475 for the tool schemas, with the seed catalog (3,010 and
+# 2,724 after the recovery rules).
+MAX_PROMPT_CHARS = 3_100
 MAX_TOOL_SCHEMA_CHARS = 2_900
 
 
