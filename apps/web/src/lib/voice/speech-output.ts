@@ -15,6 +15,75 @@
 /** Long utterances are cut off by some browsers (Chrome stops around 15 s), so replies are split. */
 export const MAX_CHUNK_CHARS = 180;
 
+const MONTHS = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+] as const;
+
+function isLeapYear(year: number): boolean {
+  return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+}
+
+function daysInMonth(month: number, year: number): number {
+  if (month === 2) return isLeapYear(year) ? 29 : 28;
+  return [4, 6, 9, 11].includes(month) ? 30 : 31;
+}
+
+/**
+ * "October 1, 2026" for a real calendar date, otherwise `undefined`. The date is validated from
+ * its parts alone (month, day for that month, leap years): no `Date` parsing, so the machine's
+ * time zone cannot change the result.
+ */
+function spokenDate(
+  month: number,
+  day: number,
+  year: number,
+): string | undefined {
+  if (year < 1000 || year > 9999) return undefined;
+  if (month < 1 || month > 12) return undefined;
+  if (day < 1 || day > daysInMonth(month, year)) return undefined;
+  return `${MONTHS[month - 1]} ${day}, ${year}`;
+}
+
+// A date is recognised only as a whole token: not inside a longer word, number, identifier or
+// path (so UUIDs, tokens, versions and phone numbers are left alone), and not when more digits
+// follow after a dot, slash or hyphen.
+const ISO_DATE = /(?<![\w./-])(\d{4})-(\d{2})-(\d{2})(?![\w-]|[./]\d)/g;
+const US_DATE =
+  /(?<![\w./-])(\d{1,2})([/-])(\d{1,2})\2(\d{4})(?![\w/-]|[.]\d)/g;
+
+/**
+ * The text as it should be spoken. Only this changes: what is shown on the page is never touched.
+ *
+ * English (United States) only. The unambiguous numeric dates `YYYY-MM-DD`, `MM/DD/YYYY` and
+ * `MM-DD-YYYY` (month first, as in en-US) become "October 1, 2026", so the voice says a date and
+ * not separate digits. A date that does not exist (2026-02-30, month 13, a day 31 in a 30-day
+ * month, 29 February in a common year) is left exactly as written, and so is everything that is
+ * not a date: times, prices, phone numbers, quantities, identifiers, tokens and lone numbers.
+ */
+export function prepareTextForSpeech(text: string): string {
+  return text
+    .replace(ISO_DATE, (match, year: string, month: string, day: string) => {
+      return spokenDate(Number(month), Number(day), Number(year)) ?? match;
+    })
+    .replace(
+      US_DATE,
+      (match, month: string, _separator: string, day: string, year: string) => {
+        return spokenDate(Number(month), Number(day), Number(year)) ?? match;
+      },
+    );
+}
+
 /**
  * A deterministic split into sentence-sized chunks, in order and without repeating anything.
  * Joining the chunks with spaces gives back the text with its whitespace normalized, except that a
@@ -98,7 +167,10 @@ export type SpeakResult =
 export type SpeechOutput = {
   getSnapshot(): SpeechSnapshot;
   subscribe(listener: () => void): () => void;
-  /** Reads `text` aloud. Replaces anything already being spoken. Never throws. */
+  /**
+   * Reads `text` aloud, with numeric dates made speakable (the caller's text is not changed).
+   * Replaces anything already being spoken. Never throws.
+   */
   speak(
     id: string,
     text: string,
@@ -174,7 +246,8 @@ export function createSpeechOutput(
       const { choice } = snapshot;
       if (choice.kind === "none") return "unavailable";
       if (choice.kind === "network" && !allowNetwork) return "needs_consent";
-      const chunks = splitForSpeech(text);
+      // Dates are made speakable first, so a date is never cut up or read digit by digit.
+      const chunks = splitForSpeech(prepareTextForSpeech(text));
       if (chunks.length === 0) return "unavailable";
 
       stop(); // replaces anything already being spoken

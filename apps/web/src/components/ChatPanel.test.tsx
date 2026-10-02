@@ -1137,6 +1137,110 @@ describe("ChatPanel: spoken replies", () => {
     });
   });
 
+  describe("dates", () => {
+    const REPLY =
+      "Open times: 2026-10-06 at 1:00 PM and 10/07/2026 at 2:30 PM ($85.00). Not 2026-02-30.";
+    const SPOKEN =
+      "Open times: October 6, 2026 at 1:00 PM and October 7, 2026 at 2:30 PM ($85.00). Not 2026-02-30.";
+
+    beforeEach(() => {
+      sendTurn.mockImplementation(
+        answer(() => ({ reply: { source: "assistant", text: REPLY } })),
+      );
+    });
+
+    it("keeps the visible reply exactly as the agent wrote it, and speaks the natural date on Listen", async () => {
+      setup();
+      await send("When are you open?");
+      await screen.findByText(/Open times:/);
+
+      fireEvent.click(listen());
+
+      expect(textsSpoken()).toBe(SPOKEN);
+      // The page still shows the original text, byte for byte.
+      const shown = Array.from(document.querySelectorAll("p"))
+        .map((p) => p.textContent)
+        .filter((text) => text?.startsWith("Open times:"));
+      expect(shown).toEqual([REPLY]);
+      expect(document.body.textContent).toContain("2026-10-06");
+      expect(document.body.textContent).not.toContain("October 6, 2026");
+    });
+
+    it("applies the same normalization to automatic reading", async () => {
+      setup();
+      fireEvent.click(toggle());
+
+      await send("When are you open?");
+      await screen.findByText(/Open times:/);
+
+      expect(textsSpoken()).toBe(SPOKEN);
+    });
+
+    it("never lets the proposal token or hidden content reach the voice, dates or not", async () => {
+      sendTurn.mockImplementation(
+        answer(() => ({
+          booking_review: proposal,
+          reply: {
+            source: "assistant",
+            text: "I prepared a review for 2026-10-01. Nothing is booked until you confirm.",
+          },
+        })),
+      );
+      setup();
+      fireEvent.click(toggle());
+
+      await send("The first one");
+      await screen.findByText(/I prepared a review/);
+
+      expect(textsSpoken()).toBe(
+        "I prepared a review for October 1, 2026. Nothing is booked until you confirm.",
+      );
+      expect(textsSpoken()).not.toContain(TOKEN);
+      expect(textsSpoken()).not.toContain("Confirm booking");
+      expect(
+        document.querySelector('input[name="proposal_token"]'),
+      ).toHaveValue(TOKEN);
+      // The visible reply keeps the numeric date.
+      expect(
+        screen.getByText(/I prepared a review for 2026-10-01\./),
+      ).toBeInTheDocument();
+    });
+
+    it("leaves the reply paragraph, the timeline and the review exactly as the app rendered them", async () => {
+      sendTurn.mockImplementation(
+        answer(() => ({
+          booking_review: proposal,
+          reply: {
+            source: "assistant",
+            text: "Review for 2026-10-01 is below.",
+          },
+        })),
+      );
+      setup();
+      await send("The first one");
+      await screen.findByText(/Review for 2026-10-01 is below\./);
+      const before = document.body.innerHTML;
+
+      fireEvent.click(listen());
+
+      expect(textsSpoken()).toBe("Review for October 1, 2026 is below.");
+      // Listening changes only the button; the reply, timeline and review markup are untouched.
+      const reply = screen.getByText(/Review for 2026-10-01 is below\./);
+      expect(reply.textContent).toBe("Review for 2026-10-01 is below.");
+      expect(
+        document.body.innerHTML.replace(
+          /Listen to reply 1|Stop reading reply 1|>Listen<|>Stop</g,
+          "",
+        ),
+      ).toBe(
+        before.replace(
+          /Listen to reply 1|Stop reading reply 1|>Listen<|>Stop</g,
+          "",
+        ),
+      );
+    });
+  });
+
   describe("stopping on every transition", () => {
     async function speaking() {
       setup();
