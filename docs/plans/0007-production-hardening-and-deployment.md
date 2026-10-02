@@ -1,0 +1,234 @@
+# Plan 0007 — Production hardening and deployment
+
+Status: **proposed (phase 5A, research and plan only)**. Branch `feature/production-hardening-deployment`, created from `3dad109` (PR #5 squash on `main`). Nothing in this plan has been implemented or deployed, and no external service, account, key or database was touched while writing it: it rests on the repository and on official documentation read on **2026-10-02**. Gate G0 (below) waits for the owner's approval of the architecture and of the monthly cost.
+
+# Outcome
+
+A portfolio visitor opens a public URL, talks to the workshop assistant, and the demo stays safe, bounded and cheap to run: no unauthenticated way to spend the model or speech budget, no visitor text or identifier in logs, predictable behaviour when the backend is asleep or restarted, and a rollback that takes minutes. The work is split into gates so that nothing external is created, paid for or exposed before the owner approves it.
+
+## Scope
+
+Included: hardening of the existing API and web app (authentication between them, rate limits, budgets, log and error hygiene, security headers, readiness, graceful shutdown), reproducible deployment configuration, an explicit cold-start experience, a controlled end-to-end check, and the documentation to operate it.
+
+Excluded for this phase: any code, dependency, migration, secret or configuration for a provider; account or service creation; real provider calls. Also out of scope for the whole plan unless the owner decides otherwise: streaming, a persistent conversation store, authentication of visitors, rescheduling and cancellation.
+
+## Sources consulted (official only, 2026-10-02)
+
+Each row records what was relied on. "Not confirmed" means the official page fetched did not state it; the plan then designs a check instead of assuming it.
+
+| Topic | URL | Relied on | Not confirmed |
+| --- | --- | --- | --- |
+| Supabase changelog | https://supabase.com/changelog | Most recent entries were scanned first (the page's own ordering, newest 2026-10-01). Relevant items: Supavisor session mode left port 6543 on 2025-02-28 (6543 is transaction mode only; session mode is 5432); direct connections are IPv6 by default and IPv4 is a paid add-on; Supavisor enforces network restrictions. No breaking change affecting a backend that uses the shared pooler in session mode was found. | The page lists only recent entries; re-read it at G0 before the first connection. |
+| Supabase connections | https://supabase.com/docs/guides/database/connecting-to-postgres | Direct 5432 for persistent backends; shared pooler session mode 5432 (IPv4 on all plans, user `postgres.<ref>`, prepared statements supported); transaction mode 6543 for serverless (no prepared statements, pool size 1 per instance); `sslmode=require` minimum. | |
+| Supabase connection limits | https://supabase.com/docs/guides/platform/compute-and-disk and https://supabase.com/docs/guides/database/connection-management | Nano (free) and Micro: 60 direct connections, 200 pooler clients; guidance not to commit more than 40% (heavy PostgREST use) or 80% of max connections to the pool. | |
+| Supabase SSL | https://supabase.com/docs/guides/platform/ssl-enforcement | `verify-full` is the strongest mode; the CA certificate is downloaded from the dashboard; enforcing SSL reboots the database briefly. | Certificate validity and rotation policy. |
+| Supabase free plan | https://supabase.com/docs/guides/platform/billing-faq | Two active free projects; spend caps do not apply to the Free plan. | **The inactivity-pause rule (how long, how to restore) is not in the page fetched.** Treated as a risk to confirm in the dashboard (G0). |
+| Vercel limits | https://vercel.com/docs/limits and https://vercel.com/docs/functions/limitations (updated 2026-08-24) | Hobby: function duration 300 s (default and maximum, Fluid compute), 2 GB / 1 vCPU, request and response body 4.5 MB, 1,024 shared file descriptors, 100 deployments a day, runtime logs kept 1 hour. | |
+| Vercel Hobby | https://vercel.com/docs/plans/hobby and https://vercel.com/docs/limits/fair-use-guidelines (updated 2026-09-14) | Free; included usage (for example 1,000,000 function invocations, 4 CPU-hours, 100 GB data transfer); exceeding a limit pauses the feature for up to 30 days instead of billing; **Hobby is restricted to non-commercial personal use** (a portfolio with no payments or ads is not commercial by the page's definition). | |
+| Vercel monorepo and variables | https://vercel.com/docs/monorepos and https://vercel.com/docs/environment-variables | One project per directory with the Root Directory setting (`apps/web`); unaffected projects skipped; variables are per environment, encrypted at rest, visible to project members, 64 KB total, changes apply only to new deployments. | |
+| Vercel Python and FastAPI | https://vercel.com/docs/functions/runtimes/python and https://vercel.com/docs/frameworks/backend/fastapi (updated 2026-08) | ASGI/FastAPI supported; Python 3.12 default, 3.13 and 3.14 available; bundle 500 MB uncompressed; a FastAPI app becomes **one function**; lifespan events supported but **shutdown cleanup is limited to 500 ms after SIGTERM**; streaming on. The pages do not label the runtime "Beta" (large functions and the 1,800 s duration are the labelled betas). | Cold-start time for this dependency set. |
+| Vercel client IP | https://vercel.com/docs/headers/request-headers | `x-forwarded-for`, `x-real-ip` and `x-vercel-forwarded-for` carry the client's public IP; Vercel **overwrites** a client-supplied `X-Forwarded-For`; a trusted-proxy option exists only on Enterprise. | |
+| Vercel WAF rate limiting | https://vercel.com/docs/vercel-firewall/vercel-waf/rate-limiting | Available on Hobby: **1 rule per project**, counting keys IP or JA4, fixed window of 10 s to 10 min, 1,000,000 allowed requests included, counters per region. | Whether one rule can match two paths. |
+| Next.js security | https://nextjs.org/docs/app/guides/content-security-policy and https://nextjs.org/docs/app/guides/data-security (v16.3.8) | Nonce CSP needs dynamic rendering and the `proxy` file; static CSP via `next.config` headers needs `'unsafe-inline'` for scripts; Server Actions are POST only and compare `Origin` with `Host`/`X-Forwarded-Host` (`serverActions.allowedOrigins` for proxies); closures are encrypted with a per-build key (`NEXT_SERVER_ACTIONS_ENCRYPTION_KEY` to pin it); treat every action as a public endpoint. | |
+| Render free | https://render.com/docs/free | Spins down after 15 minutes without inbound traffic; spin-up "about one minute"; 750 free instance hours a month; one instance, no disk; 512 MB / 0.1 CPU (compute-plans page); can be suspended when free hours or bandwidth are exhausted. The page says nothing about keep-alive pings. | |
+| Render services | https://render.com/docs/web-services, https://render.com/docs/health-checks, https://render.com/docs/deploys, https://render.com/docs/rollbacks, https://render.com/docs/blueprint-spec, https://render.com/docs/docker, https://render.com/docs/compute-plans | Bind `0.0.0.0` on `$PORT` (default 10000); TLS terminated by Render; HTTP health checks need 2xx or 3xx within 5 s, traffic is removed after 15 s of failures and the instance restarted after 60 s; zero-downtime deploys wait for healthy; SIGTERM then up to `maxShutdownDelaySeconds` (default 30, maximum 300) before SIGKILL; dashboard rollback reuses the previous artifact and disables auto-deploy; Blueprint fields `healthCheckPath`, `maxShutdownDelaySeconds`, `rootDir`, `dockerfilePath`, `region` (oregon, ohio, virginia, frankfurt, singapore), `envVars` with `sync: false`; Docker builds use BuildKit and **build arguments must not carry secrets**; plan `0.5c-512mb` is the old Starter. | **The price of an always-on instance: the pricing page is rendered by script and no dollar amount could be read from it.** A Render marketing article quotes about 7 USD a month for Starter; that is not a basis for a decision, so G0 requires the owner to read the figure on https://render.com/pricing. **Request timeout, body-size limit and how the client IP is forwarded are not in the pages fetched**, so the design never relies on them (it authenticates the web server and measures at G6). |
+| Groq limits | https://console.groq.com/docs/rate-limits | Limits apply per **organization**; Free plan for `openai/gpt-oss-120b`: 30 RPM, 1K RPD, 8K TPM, 200K TPD; for Whisper Large v3 and Turbo: 20 RPM, 2K RPD, 7.2K audio seconds per hour, 28.8K per day; 429 with `retry-after`; headers `x-ratelimit-remaining-*`; cached tokens excluded. | |
+| Groq projects and spend | https://console.groq.com/docs/projects and https://console.groq.com/docs/spend-limits | A project has its own API keys and **custom per-model rate limits that cannot exceed the organization's**; spend tracking per project; **monthly spend limits are organization-wide and not available on the Free plan** (blocked calls return 400 `blocked_api_access`). | Whether custom limits are available on the Free plan. |
+| Groq data | https://console.groq.com/docs/your-data | No inference data is retained by default except up to 30 days for reliability or abuse; audio endpoints follow the same rule; Zero Data Retention is enabled in Data Controls by organization admins and disables batch and fine-tuning. | |
+
+The changelog and several pages were read through a fetch tool that returns each page's text, not a screenshot; figures above are as that text stated them. Everything marked "not confirmed" becomes an explicit check at the gate named in the table of risks.
+
+# Topologies compared
+
+Common to all three: Vercel Hobby hosts the Next.js app (a portfolio is not commercial use by Vercel's definition; the 4.5 MB body limit is far above the 512 KB audio cap; a turn is at most 26 s against a 300 s limit); Supabase hosts the catalog and appointments through the existing `voice_agent_api` role; Groq serves the model and speech-to-text. The browser only ever talks to the Vercel origin (the API address never leaves the server).
+
+| | 1. Vercel + Render **Free** + Supabase + Groq | 2. Vercel + Render **always-on** + Supabase + Groq | 3. Vercel (web) + Vercel **Python API** + Supabase + Groq |
+| --- | --- | --- | --- |
+| Monthly cost and billing risk | 0 USD. Render free cannot bill, only suspend; Supabase Free cannot bill; Vercel Hobby pauses instead of billing; Groq Free cannot bill. Risk is availability, not charges. | Render instance price **to be read from the pricing page by the owner** (about one cup of coffee; unconfirmed); everything else as column 1. Charges are bounded by the instance price plus bandwidth. | 0 USD on Hobby. If the owner upgrades Groq to a paid tier for headroom, only then can Groq bill (and then a spend limit exists). |
+| Cold start | Spins down after 15 min idle; about 1 minute to wake. A visitor can wait. | None in normal operation. | Serverless cold start (seconds, not measured: the Python bundle with LangChain and LangGraph was never built there). |
+| Conversation state | In memory in one process: lost on spin-down, restart and deploy (the 30-minute idle expiry makes this rarely visible, a restart makes it certain). Handled today by the "conversation can't continue" notice. | Same, but only on deploys, crashes and maintenance. | Must move to Postgres (conversations, turns, idempotency): ADR 0007's in-memory store and per-process locks do not work across function instances. |
+| Fit with the current code | Exact: FastAPI process, startup and shutdown lifespan, thread pools, in-memory bounded concurrency. | Exact. | Large: store, idempotency, rate limits, budgets and the abandoned-call accounting all become cross-instance problems; shutdown cleanup is limited to 500 ms. |
+| PostgreSQL connection | Shared pooler **session mode, port 5432** (IPv4 everywhere); app pool of at most 5 (already capped at 10). | Same. | **Transaction mode, port 6543**, pool size 1 per instance; the code already sets `prepare_threshold=None`, which transaction mode needs. Instance count multiplies connections (200 pooler clients on Nano). |
+| Rate limits and budgets | One process, so in-memory counters are exact; they reset on restart (backstopped by Groq-side limits). | Same. | Must be persistent and atomic in Postgres (new tables and migration) or rely on the single Vercel WAF rule. |
+| Audio limits | Web route buffers at most 512 KB, API reads incrementally. | Same. | Same, plus the 4.5 MB platform cap (not binding). |
+| Privacy | Visitor text reaches Render's logs only if the app logs it (it does not, and tests will pin that); Groq ZDR as today. | Same. | Conversation text would be **stored in Postgres**, which needs a retention policy (see ADR 0007's limits). |
+| Complexity and upkeep | Low. Two dashboards plus Supabase and Groq. | Low. | High: new persistence, new migration, new failure modes, Python runtime specifics. |
+| Recruiter experience | First visit after idle: up to about a minute of "Starting workshop assistant…" (designed explicitly). Fine for a link that is shared in advance, poor for a cold click. | Instant and consistent. | Instant after a few seconds; best in principle, but only after a larger rewrite. |
+| Code changes | Hardening (G1), Docker and Blueprint (G2), wake gate (G1). | Same as 1 (the wake gate then rarely shows). | Everything in 1 plus a new persistence layer, a Vercel entrypoint, a transaction-mode check, new ADRs. |
+| Rollback | Render dashboard rollback (disables auto-deploy until re-enabled) and Vercel promote of the previous deployment; no schema change. | Same. | Same for code; a migration adds irreversible-in-practice schema. |
+
+**Recommendation: option 2, reached through option 1.** Build and verify everything on Render Free (no cost, same code), then move the same service to an always-on plan in the Render dashboard before the portfolio link is shared. The code is identical; only the plan differs, and the wake gate designed below is useful in both (restarts, deploys, a stopped service). Option 3 is not recommended now: it is the best shape for a stateless platform, but it needs a persistent conversation store and persistent counters that the portfolio does not otherwise need, and it would reopen the privacy question of storing visitor text. It stays a documented later phase. Neither the price nor the free tiers decided this: the deciding factors are that option 2 keeps the tested single-process design, removes the cold start a recruiter would otherwise meet, bounds cost to one fixed amount, and keeps rollback to a dashboard click.
+
+# Audit of the current code
+
+All of this was read from the repository (no secret values, no `.env`).
+
+## Public surface
+
+Web (`apps/web`, Next.js 16.3.7): pages `/`, `/assistant`, `/appointments/[id]`, `/book` (redirect), `/icon.svg`; route handler `POST /api/voice/transcribe`; Server Actions `sendTurn` (assistant) and `confirmBooking` (book). Everything the browser can reach is on one origin. `next.config.ts` is empty: **no security headers, no CSP, no `proxy` file**, no `allowedOrigins`.
+
+API (`apps/api`, FastAPI): `GET /health`; `GET /v1/business`, `/v1/services`, `/v1/services/{id}/availability`; `POST /v1/appointment-proposals`; `POST /v1/appointments` (the only write; needs a signed proposal and `confirm: true`); `GET /v1/appointments/{id}`; `POST /v1/agent/turns`; `POST /v1/speech/transcriptions`; plus FastAPI's `/docs`, `/redoc` and `/openapi.json`. **There is no authentication, no CORS configuration, no rate limiting and no request logging middleware.**
+
+Flow: browser → Vercel (Server Component reads, Server Actions, one route handler) → API (`API_BASE_URL`, server-only) → Postgres, Groq chat, Groq speech. The browser makes no API or provider request. The proposal token reaches the browser only as a hidden form input.
+
+## Configuration (names only)
+
+Web: `API_BASE_URL`. API: `APPOINTMENT_STORE`, `BUSINESS_ID`, `PROPOSAL_SIGNING_KEY`, `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_SSLMODE`, `DB_ALLOW_REQUIRE_SSLMODE`, `DB_SSLROOTCERT`, `DB_POOL_MAX`, `DB_CONNECT_TIMEOUT_S`, `DB_POOL_TIMEOUT_S`, `DB_POOL_MAX_WAITING`, `DB_STATEMENT_TIMEOUT_MS`, `DB_LOCK_TIMEOUT_MS`, `DB_IDLE_IN_TRANSACTION_TIMEOUT_MS`, `AGENT_PROVIDER`, `GROQ_API_KEY`, `AGENT_MODEL`, `AGENT_TEMPERATURE`, `AGENT_MAX_OUTPUT_TOKENS`, `AGENT_REASONING_EFFORT`, `AGENT_REASONING_CONTROL`, `AGENT_TURN_DEADLINE_S`, `AGENT_MODEL_TIMEOUT_S`, `AGENT_TOOL_TIMEOUT_S`, `APP_ENV` (defaults to `production`), `SPEECH_PROVIDER`, `SPEECH_MODEL`, `SPEECH_TIMEOUT_S`, `SPEECH_READ_TIMEOUT_S`, `SPEECH_MAX_AUDIO_BYTES`, `SPEECH_MAX_CONCURRENT`, `VOICE_AGENT_ENV_FILE`. Settings fail closed with fixed messages that name only the setting.
+
+## State, pools and timeouts
+
+- **Persistent:** catalog and appointments in Postgres (`booking` schema, role `voice_agent_api`). **In memory, one process:** conversations (at most 200, idle expiry 30 minutes, 1,000 tombstones), turn idempotency, speech slot counters.
+- **Pool:** psycopg `ConnectionPool`, `min_size=1`, `max_size=DB_POOL_MAX` (default 5, cap 10), connect timeout 3 s, pool wait 2 s, statement timeout 1 s, `prepare_threshold=None`; opened and closed in the FastAPI lifespan through the thread pool; `sslmode=verify-full` with a CA file is required unless explicitly relaxed.
+- **Timeouts:** reads 12 s, mutations 15 s, agent turn 26 s (server bound 21 s), speech 14 s (server bound 9 s) on the web side; no automatic retries to providers; the UI retries with the same `client_turn_id`.
+- **Limits:** agent turn body validated by schema (message at most 500 characters, 30 turns), at most 4 agent turns in flight (429 `agent_busy`), 2 transcription slots (429 `speech_busy`), audio at most 512 KB read incrementally within 3 s, signature sniffing, `X-Audio-Duration-Ms` diagnostic only.
+
+## Findings
+
+| # | Finding | Risk | Where it is addressed |
+| --- | --- | --- | --- |
+| A1 | Anyone who learns the API URL can call `/v1/agent/turns` and `/v1/speech/transcriptions` directly and spend the Groq budget; the proposal and confirm routes are also reachable. | High once public | §D.1, §D.10 |
+| A2 | No rate limit anywhere; only in-flight concurrency caps (4 and 2), which a slow trickle can still saturate. | High | §D.1 to §D.4 |
+| A3 | No token or audio-second budget; Groq's organization limits (8K TPM and 200K TPD on the Free plan) would be the only brake, and one real turn costs thousands of tokens. | High | §D.3, §D.4 |
+| A4 | Uvicorn's access log prints request paths, including `GET /v1/appointments/<id>`; the documented run commands leave it on. | Medium (privacy) | §D.11 |
+| A5 | `_unhandled` logs a traceback with `exc_info`; exception messages are not redacted. Driver errors (psycopg) can carry key values, and a provider error can carry request fragments. | Medium (privacy) | §D.11, §D.12 |
+| A6 | No trusted-proxy model. Behind Render the API sees Render's proxy; behind Vercel the web tier sees the real client IP (`x-forwarded-for`, overwritten by Vercel). The API cannot tell clients apart without being told, and must not trust a forwarded header from the open internet. | Medium | §D.8, §D.9 |
+| A7 | `/health` exists but there is no readiness (database reachable, provider configured) and `/docs` and `/openapi.json` are public. | Low to medium | §D.14 |
+| A8 | The web route handler's same-origin check compares `Origin` with `Host`; a missing `Origin` is refused (documented in ADR 0009). It is a cross-site guard, not authentication. Server Actions rely on Next's own origin check. | Low | §D.7, §D.13 |
+| A9 | No security headers or CSP. The Orb uses inline `style` attributes, which a strict CSP must allow through `style-src-attr`. | Medium | §D.13 |
+| A10 | In-memory conversations vanish on restart; a retry after a restart becomes `not_found` or, within the idempotency window, a brand-new conversation. The UI already ends the conversation with a notice and keeps the text. | Low (documented) | §D.19, §E |
+| A11 | Web and API timeouts are pinned together by tests, but there is no graceful-shutdown contract: a turn in flight during a Render deploy can be cut at SIGKILL. | Low | §D.15 |
+| A12 | Switching Voice and Text while **Confirm booking** is in flight remounts the form (the Server Action and its redirect are not affected). | Low | G1 item |
+| A13 | At 200% text or zoom 2x the Stop and Send controls sit below the first screen of the voice stage. | Low (accessibility) | G1 item |
+| A14 | The web server forwards no client identity to the API, and the API's body buffering of audio is bounded (512 KB) but the web tier buffers the same amount per connection before it can answer 429. | Low | §D.6 |
+| A15 | `GROQ_API_KEY` is shared by the chat and speech adapters, so a project key limited per model cannot separate them; project limits can. | Low | §D.4 |
+
+Documented items re-checked: ADR 0009 and `docs/HARNESS.md` list the public rate limit, spend cap, access log, exception redaction, audio-duration verification (still a byte cap only), deployment and in-memory sessions as Milestone 5 work; all appear above and none was found fixed.
+
+# Security design (to implement at G1, not now)
+
+Every value is an environment setting with a conservative default and a test that pins it. Numbers below are starting points with their reason; the method to calibrate them is part of G1 and G9, so none is final.
+
+1. **Rate limiting per endpoint and globally.** In-process token buckets keyed by client id, plus global buckets, in the API (one instance makes them exact). Names: `RATE_LIMIT_ENABLED` (default on in production), `RATE_LIMIT_AGENT_PER_CLIENT`, `RATE_LIMIT_SPEECH_PER_CLIENT`, `RATE_LIMIT_WRITE_PER_CLIENT`, `RATE_LIMIT_READ_PER_CLIENT`, and `RATE_LIMIT_AGENT_GLOBAL_PER_MIN`, `RATE_LIMIT_SPEECH_GLOBAL_PER_MIN`. Answers 429 `rate_limited` with `Retry-After`. Reasoning for the starting values: the Free-plan chat limit is 8K TPM and a measured live turn costs on the order of 1.5K to 3K tokens (6,264 tokens for the four requests of one live session in plan 0004), so the **global agent rate is set from `floor(0.7 × provider TPM ÷ measured p95 tokens per turn)`**, about 2 to 3 turns a minute on the Free plan; per-client limits start at a human conversation pace (a turn a few seconds apart, a short burst allowed) and are measured, not guessed, in G1's scripted profile and G9. Read-only business routes get a looser limit.
+2. **Concurrency limits for agent and speech.** Keep the existing caps (4 turns, 2 transcriptions) as the last line, make them settings (`AGENT_MAX_IN_FLIGHT`, already `SPEECH_MAX_CONCURRENT`), and add a bounded queue wait of zero (reject at once with 429) so slow requests cannot pile up.
+3. **Budgets.** `AGENT_DAILY_TOKEN_BUDGET` and `SPEECH_DAILY_AUDIO_SECONDS`, counted from the provider's usage metadata and, for audio, as the **larger of the real length estimate and the 10 s minimum billed per request** (ADR 0009). Defaults at half of the Free-plan daily limits (100K tokens, 14.4K audio seconds) so a restart or a counting error still leaves margin. When spent, the API answers 503 `demo_budget_reached` and the UI says so plainly. Counters reset on restart; the Groq-side limit (item 4) is the hard backstop. Persisting them is decision D5.
+4. **Groq project limits.** A dedicated production project and key (G4) with per-model custom rate limits below the organization's, and the organization's Zero Data Retention confirmed. Spend limits are organization-wide and need a paid tier; staying on the Free plan means the hard ceiling is the plan itself (no billing possible). Chat and speech share one key today; separate keys per use are possible with two projects if wanted (A15).
+5. **Double send.** Already idempotent per `client_turn_id`, `turn_in_progress` 409 and a disabled send path in the UI. Add a test that two simultaneous identical posts through the web action reach the model once, and that a second recording is blocked while a turn is in flight (already covered in the browser; keep).
+6. **Audio size and duration before processing.** Keep incremental reads and the byte cap, lower the production default of `SPEECH_MAX_AUDIO_BYTES` to a value **derived from measured browser clips** (15 s at the browser's real bitrates, Chromium and Safari formats) with headroom, and reject larger bodies at the web route before they are buffered whole. Duration stays unverifiable server-side without a dependency; the budget in item 3 charges the worst case, which is what protects the quota.
+7. **CORS.** The browser never calls the API, so the API gets **no CORS middleware** and a test that no `Access-Control-Allow-*` header is ever sent; if a cross-origin caller is ever needed, an explicit `CORS_ALLOWED_ORIGINS` (empty by default).
+8. **Forwarded headers.** The API ignores `X-Forwarded-For` and `Forwarded` entirely (uvicorn run with proxy headers off). Client identity is supplied by the authenticated web tier (item 10), never read from a header an arbitrary caller can set.
+9. **No IP spoofing.** On Vercel the web server reads the client IP from `x-vercel-forwarded-for` or `x-forwarded-for`, which Vercel overwrites (documented). It forwards only a **keyed hash** of it (`HMAC-SHA256` with a server-side pepper, truncated), so the API never stores or logs a raw address; the API trusts that value only on requests that passed item 10. Tests send forged headers to the API directly and expect them to change nothing.
+10. **Protecting the API when its URL is known.** Server-to-server authentication: the web tier sends `Authorization: Bearer <API_SHARED_SECRET>` on every call; the API compares in constant time and answers 401 otherwise, for every route except `GET /health` (Render's health check cannot send a header). `API_SHARED_SECRET` is at least 32 random bytes, different per environment, and the API **refuses to start in production without it**. `/docs`, `/redoc` and `/openapi.json` are disabled in production. This is a shared secret, not user authentication: it protects the budget, not visitor identity.
+11. **Log sanitisation.** Uvicorn runs with `--no-access-log` (verify the flags against the installed version offline); application logs keep the current rule (outcome codes and route templates only). Tests inject sentinel strings (a message, a transcript, a token, a UUID, a provider payload) through every route and fail if any appears in captured logs, including error paths.
+12. **Safe exception handling.** Replace `exc_info` logging with a class-name-only record plus a request-scoped opaque id, behind a `LOG_TRACEBACKS` switch that is off in production; a redaction test for psycopg and provider exceptions. The web tier gets the same treatment (no error message from the API is ever logged or shown, already true for the browser).
+13. **Security headers and CSP.** In `next.config.ts` and a `proxy.ts`: `Content-Security-Policy` with a per-request nonce (`strict-dynamic`, `object-src 'none'`, `base-uri 'self'`, `frame-ancestors 'none'`, `form-action 'self'`, `connect-src 'self'`) plus `style-src-attr 'unsafe-inline'` for the Orb's inline styles; `X-Content-Type-Options: nosniff`; `Referrer-Policy: strict-origin-when-cross-origin`; `Permissions-Policy` allowing `microphone=(self)` only; `Strict-Transport-Security`; `Cross-Origin-Opener-Policy`. Nonces force dynamic rendering, which this app already uses for its pages. Ship in **Report-Only first** (decision D8), then enforce after the browser pass.
+14. **Health and readiness.** `GET /health` stays a constant `{"status":"ok"}`. Add an authenticated `GET /ready` that checks the pool with a short `select 1` and reports booleans only (database reachable, agent configured, speech configured): no counts, versions, hosts or names.
+15. **Graceful shutdown.** Keep lifespan pool closing; set `maxShutdownDelaySeconds` to 30 (above the 21 s turn bound), stop accepting turns on SIGTERM, let in-flight turns finish, and close the pool and the thread pools last. A test sends SIGTERM during a scripted slow turn.
+16. **Secrets.** One set per environment, never reused from development: a new Supabase password for `voice_agent_api`, a new `PROPOSAL_SIGNING_KEY` (a rotation invalidates open reviews, which last 10 minutes), a new `API_SHARED_SECRET`, a new Groq production project key; set in dashboards only (Render `sync: false`, Vercel Sensitive), never in the repository, build arguments or chat.
+17. **Zero Data Retention.** Confirmed for the Groq organization that owns the production project before the first request (G4); the note about the 30-day abuse window without ZDR stays in the README; no other provider is added.
+18. **Conversation retention.** Conversations stay in memory (30-minute idle expiry, 200 maximum); nothing about visitors is persisted. If persistence is ever chosen (option 3), it needs its own plan, a retention period and deletion.
+19. **Recovery from a lost conversation.** Keep the "can't continue" notice and the read-only earlier messages; add a single explicit action that starts a new conversation and puts the visitor's last message back in the box (never resent automatically). Document the in-memory limit in the user-facing copy.
+20. **Rollback.** Render: dashboard rollback to the previous successful deploy (note: it disables auto-deploy until re-enabled); Vercel: promote the previous deployment; no schema change is planned, so there is nothing to migrate back; secrets rotation list kept in the operations notes; a runbook step "disable the assistant" that sets `AGENT_PROVIDER=disabled` and `SPEECH_PROVIDER=disabled` (the app already degrades to a notice).
+
+# Cold-start experience (if Render Free is used)
+
+Applies to both plans, because restarts and deploys also make the API unavailable.
+
+- The web tier exposes `GET /api/assistant/ready`, which calls the API's `/health` (no Groq, no database) with a short timeout and returns `ready`, `starting` or `unreachable`. It is rate-limited and never calls the agent.
+- On first interaction the assistant shows **"Starting workshop assistant…"** in the voice stage and in Text, with `aria-busy` and a polite status, an elapsed-time hint after a few seconds ("this can take about a minute"), and a **Retry** button. The Start and Send controls are disabled with a visible reason; the microphone is not requested; no turn, transcription or agent call is made before readiness.
+- Polling uses exponential backoff (about 2 s growing to about 8 s with jitter) and a hard cap near two minutes (the documented spin-up is about one minute), cancels on unmount and on `pagehide`, and stops on success. After the cap the state is "The assistant isn't responding", with Retry and a link back to the workshop page.
+- Switching to Text does not fake readiness: Text shows the same state and keeps the visitor's draft. If the API stops answering mid-session, the existing retry notice appears and a wake poll starts.
+- There is **no keep-alive, scheduled ping or any attempt to defeat spin-down**: the plan's behaviour is accepted and made visible. Moving to an always-on plan is the remedy, not a pinger.
+- Tests: scripted API that wakes after N polls; cancellation; timeout; accessibility (axe, live region, focus); no agent call before `ready`.
+
+# Database
+
+- **Mode.** Backend on Render: shared pooler **session mode on 5432** (IPv4 on every plan, prepared statements allowed, user `postgres.<ref>`); no IPv4 add-on is needed. Transaction mode 6543 only for option 3. The code already uses `prepare_threshold=None`, so either works.
+- **Pool.** Keep `DB_POOL_MAX=5` (cap 10): with one instance this is far below the 60 direct and 200 pooler limits on Nano, and the application never needs more than a handful of concurrent queries (statement timeout 1 s).
+- **TLS.** Keep `verify-full`. The public CA certificate is not a secret; it is delivered either as a file committed with its source and checksum or as a Render secret file (decision at G2). The documentation read does not state the certificate's validity, so the operations notes record how to refresh it.
+- **Role and RLS.** `voice_agent_api` has least-privilege grants and RLS is on every `booking` table (migration tests assert it). **No new migration is required for options 1 or 2.** Persisting counters or conversations would need a CLI migration and an ADR (decisions D5 and option 3).
+- **Free-plan pause.** The Supabase Free plan may pause an inactive project; the rule was not in the page read. The whole app depends on the catalog, so a paused project makes the assistant unavailable. The readiness probe reports it, and the operations notes describe the manual restore. No artificial keep-alive is proposed (decision D3).
+- Nothing was executed against Supabase while writing this plan.
+
+# Plan by gates
+
+Each gate ends with a stop. "Claude" never receives a secret; the owner enters secrets only in dashboards or hidden prompts.
+
+| Gate | What Claude does | What the owner does | Secrets | External changes | Pass criteria | Rollback | Stop |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| **G0** Approve architecture and cost | Presents this plan, the comparison and the decision list. | Chooses topology (D1), reads the Render and Supabase prices and pause rules, picks regions (D2, D3), Groq tier (D4), counters persistence (D5), domain (D6). | None | None | Written approval of the decisions. | Discard the branch. | Waits for approval. |
+| **G1** Local hardening (split into 1A API, 1B web and UX) | Implements §D items 1 to 15 and 19, the wake gate, the Confirm-form lift, the sticky controls and every test, in small commits on the branch. | Reviews the PRs. | None (tests use generated throwaway values) | None | Offline suites, new security tests, browser rehearsal against scripted services all green. | Revert commits. | Stops before any deployment file. |
+| **G2** Reproducible deploy configuration | Adds the API Dockerfile (or the documented native runtime), `render.yaml` (health path, shutdown delay, `sync: false` secrets, one instance), Vercel project notes (`apps/web` root, install filter), the operations runbook and `.env.example` updates. | Reviews. | None | None | Files validate offline; no secret appears anywhere; checklist complete. | Revert. | Stops before building images. |
+| **G3** Local production build and verification | Builds the web (`pnpm build`) and the API image or production-flag run locally, with the API's production flags, auth on, rate limits on, scripted model and speech, loopback only; runs the full browser pass and log-sentinel tests. Docker availability on the owner's machine is a precondition (D7). | Installs Docker if wanted. | Generated local-only secrets | None | Production-mode behaviour proven offline, including 401s, 429s, headers, shutdown. | Fix and repeat. | Stops. |
+| **G4** Groq production project | Writes the click-by-click instructions. | Creates the production project and its key in the Groq console, sets per-model custom limits, confirms Zero Data Retention, optionally a paid tier with a spend limit (D4); stores the key only in the Render dashboard later. | The Groq key (owner only) | Groq console changes by the owner | Project limits and ZDR confirmed in the dashboard by the owner. | Delete the key and project. | Stops. |
+| **G5** Create and configure the backend service | Gives the exact settings to enter (service type, plan, region, branch, health path, shutdown delay, variables by name). | Creates the Render service from the Blueprint or by hand, enters every secret in the dashboard, creates the Supabase production credentials (new `voice_agent_api` password, session-pooler host, CA file), keeps auto-deploy off at first. | Render env secrets, DB password, signing key, shared secret | Render and Supabase dashboard changes by the owner | Service created, all variables present (names verified by the owner), no deploy yet or deploy of the unchanged baseline. | Delete the service; rotate any secret that was pasted anywhere else. | Stops. |
+| **G6** Backend deploy and limited smoke | With the owner's approval, tells them what to deploy; runs only read-only smoke checks the owner authorises (health, ready with the bearer secret supplied by the owner in a hidden prompt, 401 without it, forged-header test, one catalog read); measures cold start, shutdown and the real forwarded-header behaviour. **No Groq call.** | Deploys; approves each smoke step. | Shared secret for the smoke (hidden prompt) | The backend is deployed by the owner | Health and readiness correct, 401 and 429 behave, no sentinel in logs, cold start and request limits measured and recorded. | Render rollback. | Stops. |
+| **G7** Deploy the web on Vercel | Gives exact project settings (Root Directory `apps/web`, framework, install filter, environment scopes). | Imports the repository, sets `API_BASE_URL`, `API_SHARED_SECRET`, the rate-limit pepper and (if chosen) `NEXT_SERVER_ACTIONS_ENCRYPTION_KEY` as Sensitive variables, deploys a Preview first. | Vercel env secrets | Vercel project created by the owner | Preview works against the backend; headers present (Report-Only); one WAF rate-limit rule configured if its path matching allows. | Delete the project or promote a previous deployment. | Stops. |
+| **G8** Origins and domains | Lists the origins to set (Server Actions `allowedOrigins`, CSP report endpoint if any, no API CORS). | Attaches a custom domain if wanted (D6), confirms HTTPS. | None | DNS and domain by the owner | Same-origin checks pass on the final host; no mixed content. | Remove the domain. | Stops. |
+| **G9** Controlled real end-to-end | Agrees a script with the owner: one fictional conversation, one voice turn, one booking with confirmation and replay, the budget and rate-limit paths, measured token and audio usage against the budgets; no more provider calls than the script. | Runs it in their own browser (real microphone) and watches the Groq and Render dashboards. | None new | Real Groq, Supabase and Render calls, counted | Everything works, usage within budgets, ZDR still on, no sentinel or identifier in any log, cold start behaves as designed. | Set providers to `disabled`; Render rollback. | Stops. |
+| **G10** Review, documentation, PR, merge | Final security review of the diff and the deployed settings, operations notes, README and ADR updates (ADR 0011 accepted), PR, squash merge only on the owner's approval. | Approves. | None | Merge to `main` | Review has no P0 to P2; documentation current. | Revert the squash; Render and Vercel rollbacks. | Stops. |
+
+# Verification strategy
+
+- Offline, per gate: the existing API and web suites; new tests for authentication (401 on every non-health route, constant-time compare, startup refusal), rate limits and budgets (429 and 503 bodies, `Retry-After`, reset), forged `X-Forwarded-For` and `Forwarded`, no CORS headers, security headers and CSP nonce, log-sentinel redaction on success and error paths, SIGTERM during a slow turn, readiness booleans only, wake gate (polling, backoff, cancel, cap), Confirm-form stays mounted across mode switches, high-zoom primary controls.
+- Browser rehearsal as in `docs/HARNESS.md` (scripted model and speech, throwaway profile, loopback only), extended with production flags and the new states.
+- At G6 and G9 only what the owner approves, with counts recorded.
+- `git diff --check`, secret scan and diff review before every commit; no `.env` is opened by Claude.
+
+# Scope estimate
+
+| Work | Size | Notes |
+| --- | --- | --- |
+| API authentication, `/ready`, docs routes off, startup refusal | Medium | New middleware or dependency, settings, tests. |
+| Rate limits and budgets | Large | Buckets, counters, usage metadata plumbing from the provider adapters, settings, tests, UI messages. |
+| Log and exception hygiene, uvicorn flags | Medium | Filter or handler change, sentinel tests. |
+| Web server-to-API authentication, hashed client id, ready route | Medium | `client.ts`, actions, route handler. |
+| Security headers, CSP with nonce | Medium | `next.config.ts`, `proxy.ts`, tests, Report-Only first. |
+| Wake gate and states | Large | New state in the voice stage and the text composer, accessibility, tests. |
+| Confirm-form lift, sticky controls, lost-conversation action | Small to medium | Component changes and tests. |
+| Dockerfile, `render.yaml`, runbook | Medium | Offline validation only. |
+| Documentation and ADRs | Medium | |
+
+Roughly: G1 is two to three focused pull requests (1A API, 1B web and UX, then G2 files), G3 to G10 are mostly owner actions with short, bounded checks by Claude. Nothing here requires a new dependency except possibly a small rate-limit helper; if one is wanted it is proposed at G1 and installed only after approval.
+
+# Risks
+
+| Risk | Likelihood and impact | Mitigation |
+| --- | --- | --- |
+| Free-tier cold start hurts a first impression. | High on Free, low on always-on. | Explicit wake gate; move to always-on before sharing. |
+| Supabase Free pauses an idle project (rule unconfirmed). | Medium; the app is down until restored. | Confirm the rule at G0; readiness reports it; restore runbook; accept or upgrade (D3). |
+| Groq Free limits (8K TPM) throttle a burst of visitors. | High for simultaneous visitors. | Global agent rate from measured tokens; friendly 429 UX; per-model project limits; consider a paid tier with a spend limit (D4). |
+| In-memory budgets reset on restart. | Low. | Half-of-limit defaults; Groq-side ceilings; optional persistence (D5). |
+| A forgotten or leaked shared secret exposes the budget. | Low if handled. | Rotation runbook; dashboards only; never in chat. |
+| CSP breaks a feature. | Medium. | Report-Only first, full browser pass, enforce after. |
+| Render forwards client IPs or enforces timeouts differently than assumed. | Unknown (undocumented in pages read). | The design does not depend on them; measured at G6. |
+| Vercel Hobby non-commercial rule changes or is misread. | Low. | The site has no payments or ads; revisit if that changes. |
+| Real microphone, devices, phones and screen readers remain only partly exercised. | Medium. | Owner's manual pass at G9 on their own devices. |
+
+# Decisions needed from the owner (for G0)
+
+1. **D1 Topology:** option 2 reached through option 1 (recommended), option 1 only, or option 3 later.
+2. **D2 Render:** plan (read the price at https://render.com/pricing), region (ideally the same continent as the Supabase project), start on Free then upgrade, or paid from the start.
+3. **D3 Supabase:** the project's region, whether a possible inactivity pause is acceptable, who restores it, or whether to pay for a plan without pausing. No artificial keep-alive.
+4. **D4 Groq:** stay on the Free plan (hard ceiling, no billing possible, no spend limit) or move to a paid tier with an organization spend limit; confirm Zero Data Retention.
+5. **D5 Counters:** in-memory with Groq-side backstop (recommended) or persisted in Postgres (needs a migration and an ADR).
+6. **D6 Domain:** the generated `*.vercel.app` URL or a custom domain.
+7. **D7 Docker:** is Docker available (or acceptable to install) for G3, or should G3 use a production-flag run without it.
+8. **D8 CSP:** Report-Only for a trial period, or enforce at once after the browser pass.
+9. **D9 Visitor limits:** accept the starting rate-limit approach and the right to tighten it after G9 measurements.
+
+# Operations checklist for the owner (nothing to do yet)
+
+Do not do any of this before G0 is approved and the corresponding gate is reached. **Never paste a secret into the chat**: enter each one only in the dashboard field or in a hidden prompt.
+
+- **Vercel:** sign in with the personal account; import the GitHub repository; set Root Directory to `apps/web`; keep the framework preset; add the variables by name in the Production and Preview scopes as Sensitive (`API_BASE_URL`, `API_SHARED_SECRET`, the client-id pepper, optionally `NEXT_SERVER_ACTIONS_ENCRYPTION_KEY`); deploy a Preview first; turn on the one WAF rate-limit rule if the plan allows the path match; attach the domain last.
+- **Render:** create the web service from the Blueprint (or by hand with the same settings), choose the plan and region decided at G0, leave auto-deploy off until G6, set health check path `/health`, shutdown delay 30 s, one instance; enter every secret with `sync: false`; keep the dashboard rollback path in mind.
+- **Supabase:** confirm the project's region and plan; confirm the pause rule; create a **new** password for `voice_agent_api` (never reuse the development one); use the session pooler host on 5432; download the CA certificate from the SSL configuration section; do not change migrations, RLS or grants; leave SSL enforcement as is unless you decide otherwise (it reboots the database).
+- **Groq:** create a dedicated production project and key; set per-model custom limits below the organization's; confirm Zero Data Retention in Data Controls; if you move to a paid tier, set the monthly spend limit and alerts at 50%, 75% and 90%; store the key only in the Render dashboard.
+- **DNS or domain (only if D6 chooses one):** add the records Vercel shows; wait for the certificate; do not point the domain at Render.
+- **Variables and secrets:** generate each secret with the project's generator or a password manager, one per environment, never reused from development; keep a private list of what to rotate and when.
+- **Spend limits and alerts:** Groq alerts if a paid tier is used; check Render and Vercel usage pages after the first week.
+- **Final review:** open the public URL from a phone and a computer, run the agreed G9 script yourself with your real microphone, check the Render, Vercel and Groq dashboards afterwards, and approve the merge only then.
+
+# Decisions to record and follow-ups
+
+ADR 0011 (`proposed`) records the topology. After G0 it becomes `accepted` or is replaced. Deferred and not planned here: persistent conversations, visitor authentication, rescheduling and cancellation, real-time or streaming speech, multi-instance scaling, an external rate-limit store, and measuring audio duration on the server with a media library.
