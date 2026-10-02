@@ -145,8 +145,10 @@ async def _http_error(_: Request, exc: Exception) -> JSONResponse:
 
 
 async def _unhandled(request: Request, exc: Exception) -> JSONResponse:
-    # Log the traceback server-side; the client only ever sees a generic message.
-    logger.error("Unhandled error on %s %s", request.method, request.url.path, exc_info=exc)
+    # Log the traceback server-side; the client only ever sees a generic message. The route
+    # template is logged, never the concrete path, which can carry an appointment id.
+    route = getattr(request.scope.get("route"), "path", "-")
+    logger.error("Unhandled error on %s %s", request.method, route, exc_info=exc)
     return _envelope(500, ErrorBody(code="internal_error", message="Something went wrong."))
 
 
