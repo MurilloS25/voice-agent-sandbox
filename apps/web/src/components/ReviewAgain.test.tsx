@@ -57,7 +57,9 @@ async function press(name: string) {
 
 /** A chat with two review cards: the first is no longer active and offers "Review this time again". */
 async function twoReviews(initialDraft = "") {
-  const view = render(<ChatPanel initialMode="text" initialDraft={initialDraft} />);
+  const view = render(
+    <ChatPanel initialMode="text" initialDraft={initialDraft} />,
+  );
   for (const text of ["the first one", "the first one again"]) {
     type(text);
     await press("Send message");
@@ -148,7 +150,9 @@ describe("Review again with the same context as the page already has", () => {
 
 describe("contexts that arrive through the address still work as before", () => {
   it("uses the initial context, and a new one later, only into an empty box", () => {
-    const { rerender } = render(<ChatPanel initialMode="text" initialDraft="First context" />);
+    const { rerender } = render(
+      <ChatPanel initialMode="text" initialDraft="First context" />,
+    );
     expect(box()).toHaveValue("First context");
     type("");
     rerender(<ChatPanel initialMode="text" initialDraft="Second context" />);

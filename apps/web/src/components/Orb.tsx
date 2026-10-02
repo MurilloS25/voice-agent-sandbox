@@ -61,9 +61,12 @@ const glyphs: Record<StageKind, ReactNode> = {
  */
 export function Orb({
   stage,
+  small = false,
   children,
 }: {
   stage: StageKind;
+  /** A smaller disc, when something else (the review text) needs the room. */
+  small?: boolean;
   /** The interactive element (a button) or nothing. It sits over the disc and fills it. */
   children?: ReactNode;
 }) {
@@ -71,7 +74,9 @@ export function Orb({
   const working =
     stage === "transcribing" || stage === "thinking" || stage === "preparing";
   return (
-    <span className="relative mx-auto block aspect-square w-[clamp(8rem,30dvh,15rem)] max-w-full">
+    <span
+      className={`relative mx-auto block aspect-square max-w-full ${small ? "w-[clamp(5rem,14dvh,7.5rem)]" : "w-[clamp(8rem,30dvh,15rem)]"}`}
+    >
       {active ? (
         <span
           aria-hidden="true"

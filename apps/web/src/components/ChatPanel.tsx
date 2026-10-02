@@ -792,7 +792,10 @@ export function ChatPanel({
       : null;
   const lastTurn = turns.length > 0 ? turns[turns.length - 1] : null;
   const typedDraft =
-    mode === "voice" && !transcriptPending && draft.trim() !== "";
+    mode === "voice" &&
+    !transcriptPending &&
+    phase.kind === "idle" &&
+    draft.trim() !== "";
 
   const voiceFooter = null;
 

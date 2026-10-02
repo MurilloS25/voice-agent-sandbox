@@ -264,7 +264,7 @@ export function VoiceStage({
               </span>
             </button>
           ) : (
-            <Orb stage="review" />
+            <Orb stage="review" small />
           )}
 
           {stage === "listening" ? (
@@ -379,13 +379,6 @@ export function VoiceStage({
                     ? problemCopy(capture.state.code, VOICE_WORDING).body
                     : ""}
               </p>
-              <button
-                type="button"
-                onClick={onSwitchToText}
-                className={secondaryClass + " mt-2"}
-              >
-                Switch to Text
-              </button>
             </div>
           ) : null}
 
@@ -410,7 +403,7 @@ export function VoiceStage({
             </button>
           ) : null}
 
-          {sendingMessage !== null || lastTurn ? (
+          {stage === "review" ? null : sendingMessage !== null || lastTurn ? (
             <section
               aria-label="Latest exchange"
               className="w-full space-y-3 rounded-2xl bg-white p-4 text-left shadow-[0_2px_14px_-6px_rgb(15_59_54/0.35)]"
