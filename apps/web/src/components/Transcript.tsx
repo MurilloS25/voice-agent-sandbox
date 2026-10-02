@@ -13,6 +13,15 @@ import { tryLocalDateOf } from "@/lib/format";
 
 type Review = NonNullable<AgentTurn["booking_review"]>;
 
+/** Spoken playback of replies. Present only when the browser has a usable voice. */
+export type Playback = {
+  /** The reply being read out, if any. */
+  speakingId: string | null;
+  /** Reads the visible reply text aloud. Only that text is ever passed. */
+  onListen: (id: string, text: string) => void;
+  onStop: () => void;
+};
+
 type TranscriptProps = {
   turns: Turn[];
   /** A message that has not been answered yet (shown while it is retried). */
@@ -25,6 +34,8 @@ type TranscriptProps = {
   focusTurn?: number | null;
   /** Keeps element ids unique when several transcripts are on the page. */
   idPrefix: string;
+  /** Listen / Stop on assistant replies. Omitted when no voice is available or read-only. */
+  playback?: Playback;
 };
 
 const labelClass = "font-bold";
@@ -57,6 +68,36 @@ function Message({
       <p className={labelClass}>{who}</p>
       <p className={textClass}>{children}</p>
     </div>
+  );
+}
+
+function ListenButton({
+  turnIndex,
+  id,
+  text,
+  playback,
+}: {
+  turnIndex: number;
+  id: string;
+  text: string;
+  playback: Playback;
+}) {
+  const speaking = playback.speakingId === id;
+  return (
+    <button
+      type="button"
+      onClick={() =>
+        speaking ? playback.onStop() : playback.onListen(id, text)
+      }
+      aria-label={
+        speaking
+          ? `Stop reading reply ${turnIndex}`
+          : `Listen to reply ${turnIndex}`
+      }
+      className="min-h-12 border-2 border-bottle px-4 py-2 font-bold [overflow-wrap:anywhere] hover:bg-hivis"
+    >
+      {speaking ? "Stop" : "Listen"}
+    </button>
   );
 }
 
@@ -112,6 +153,7 @@ export function Transcript({
   liveReviewTurn = null,
   focusTurn = null,
   idPrefix,
+  playback,
 }: TranscriptProps) {
   const root = useRef<HTMLOListElement>(null);
 
@@ -145,6 +187,14 @@ export function Transcript({
               >
                 {response.reply.text}
               </Message>
+              {fromAssistant && playback ? (
+                <ListenButton
+                  turnIndex={response.turn_index}
+                  id={`${idPrefix}-${response.turn_index}`}
+                  text={response.reply.text}
+                  playback={playback}
+                />
+              ) : null}
               {review ? (
                 <ReviewBlock
                   review={review}

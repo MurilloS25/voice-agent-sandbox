@@ -4,7 +4,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Pending, TurnOutcome } from "@/app/assistant/state";
 import { expectNoA11yViolations } from "@/test/axe";
 import { agentTurn, proposal, reviewTurn } from "@/test/fixtures";
+import { fakeVoice, installSpeech, type FakeSynth } from "@/test/speech-fakes";
 import { installMedia, type FakeMedia } from "@/test/voice-fakes";
+import { resetSpeechOutput } from "@/lib/voice/use-speech-output";
 
 import { ChatPanel } from "./ChatPanel";
 
@@ -940,5 +942,396 @@ describe("ChatPanel: voice input", () => {
     serve();
     const { container } = render(<ChatPanel />);
     await expectNoA11yViolations(container);
+  });
+});
+
+describe("ChatPanel: spoken replies", () => {
+  const LOCAL = fakeVoice({ name: "Local voice", localService: true });
+  const NETWORK = fakeVoice({ name: "Network voice", localService: false });
+  let synth: FakeSynth;
+
+  function setup(voices = [LOCAL]) {
+    synth = installSpeech(voices);
+    resetSpeechOutput(); // the controller reads the browser again
+    return render(<ChatPanel />);
+  }
+
+  afterEach(() => {
+    resetSpeechOutput();
+    vi.unstubAllGlobals();
+  });
+
+  const listen = (turn = 1) =>
+    screen.getByRole("button", { name: `Listen to reply ${turn}` });
+  const toggle = () =>
+    screen.getByRole("checkbox", { name: "Read replies aloud" });
+  const textsSpoken = () => synth.texts.join(" ");
+
+  describe("by default", () => {
+    it("offers the controls but is off, and speaks nothing without a visitor action", async () => {
+      setup();
+      expect(
+        screen.getByRole("heading", { name: "Synthesized voice" }),
+      ).toBeInTheDocument();
+      expect(toggle()).not.toBeChecked();
+
+      await send("How much is a flat repair?");
+
+      expect(
+        await screen.findByText(/Answer to: How much/),
+      ).toBeInTheDocument();
+      expect(listen()).toBeInTheDocument();
+      expect(synth.spoken).toHaveLength(0); // an arriving reply is never spoken by itself
+    });
+
+    it("keeps the switch in memory only: a new page starts off again", () => {
+      const setItem = vi.spyOn(Storage.prototype, "setItem");
+      const { unmount } = setup();
+      fireEvent.click(toggle());
+      expect(toggle()).toBeChecked();
+      expect(setItem).not.toHaveBeenCalled();
+      expect(localStorage.length + sessionStorage.length).toBe(0);
+
+      unmount();
+      resetSpeechOutput();
+      render(<ChatPanel />);
+      expect(toggle()).not.toBeChecked();
+    });
+  });
+
+  describe("Listen and Stop", () => {
+    it("reads one assistant reply, then Stop silences it", async () => {
+      setup();
+      await send("Hello");
+      await screen.findByText(/Answer to: Hello/);
+
+      fireEvent.click(listen());
+
+      expect(textsSpoken()).toBe("Answer to: Hello");
+      expect(synth.spoken[0].voice).toBe(LOCAL);
+      const stop = screen.getByRole("button", { name: "Stop reading reply 1" });
+      const cancelled = synth.cancelCount;
+
+      fireEvent.click(stop);
+
+      expect(synth.cancelCount).toBeGreaterThan(cancelled);
+      expect(listen()).toBeInTheDocument(); // back to Listen
+    });
+
+    it("returns to Listen by itself when the reply ends", async () => {
+      setup();
+      await send("Hello");
+      await screen.findByText(/Answer to: Hello/);
+      fireEvent.click(listen());
+
+      act(() => synth.spoken[synth.spoken.length - 1].onend?.());
+
+      expect(listen()).toBeInTheDocument();
+    });
+
+    it("has no Listen button on system notices, and does not read them", async () => {
+      sendTurn.mockImplementation(
+        answer(() => ({
+          outcome: "degraded",
+          reply: { source: "system", text: "The assistant took too long." },
+        })),
+      );
+      setup();
+      fireEvent.click(toggle());
+      await send("Hello");
+
+      expect(
+        await screen.findByText("The assistant took too long."),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: /Listen to reply/ }),
+      ).toBeNull();
+      expect(synth.spoken).toHaveLength(0);
+    });
+
+    it("splits a long reply into ordered chunks without losing or repeating anything", async () => {
+      const long = Array.from(
+        { length: 30 },
+        (_, i) => `Sentence number ${i + 1} is here.`,
+      ).join(" ");
+      sendTurn.mockImplementation(
+        answer(() => ({ reply: { source: "assistant", text: long } })),
+      );
+      setup();
+      await send("Tell me everything");
+      await screen.findByText(/Sentence number 1 is here/);
+
+      fireEvent.click(listen());
+
+      expect(synth.spoken.length).toBeGreaterThan(1);
+      expect(synth.texts.join(" ")).toBe(long);
+    });
+
+    it("stays quiet and keeps Listen when the browser refuses to start (autoplay)", async () => {
+      setup();
+      synth.failSpeak = true;
+      await send("Hello");
+      await screen.findByText(/Answer to: Hello/);
+
+      fireEvent.click(listen());
+
+      expect(screen.queryByRole("alert")).toBeNull();
+      expect(listen()).toBeInTheDocument();
+    });
+  });
+
+  describe("Read replies aloud", () => {
+    it("reads each reply after the visitor sends a message, once the switch is on", async () => {
+      setup();
+      fireEvent.click(toggle());
+
+      await send("First question");
+      await screen.findByText(/Answer to: First question/);
+      expect(textsSpoken()).toBe("Answer to: First question");
+
+      await send("Second question");
+      await screen.findByText(/Answer to: Second question/);
+      expect(textsSpoken()).toBe(
+        "Answer to: First question Answer to: Second question",
+      );
+    });
+
+    it("turning it off stops what is being read", async () => {
+      setup();
+      fireEvent.click(toggle());
+      await send("Hello");
+      await screen.findByText(/Answer to: Hello/);
+      const cancelled = synth.cancelCount;
+
+      fireEvent.click(toggle());
+
+      expect(synth.cancelCount).toBeGreaterThan(cancelled);
+      expect(listen()).toBeInTheDocument();
+    });
+
+    it("never reads the proposal token, the review or anything but the reply text", async () => {
+      sendTurn.mockImplementation(
+        answer(() => ({
+          booking_review: proposal,
+          reply: {
+            source: "assistant",
+            text: "The review is shown below. Nothing is booked until you confirm.",
+          },
+        })),
+      );
+      setup();
+      fireEvent.click(toggle());
+
+      await send("The second one");
+      await screen.findByText(/The review is shown below/);
+
+      expect(textsSpoken()).toBe(
+        "The review is shown below. Nothing is booked until you confirm.",
+      );
+      expect(textsSpoken()).not.toContain(TOKEN);
+      expect(textsSpoken()).not.toContain("Confirm booking");
+      // the token is in the form's hidden input, which is never read
+      expect(
+        document.querySelector('input[name="proposal_token"]'),
+      ).toHaveValue(TOKEN);
+    });
+  });
+
+  describe("stopping on every transition", () => {
+    async function speaking() {
+      setup();
+      fireEvent.click(toggle());
+      await send("Hello");
+      await screen.findByText(/Answer to: Hello/);
+      expect(
+        screen.getByRole("button", { name: "Stop reading reply 1" }),
+      ).toBeInTheDocument();
+    }
+
+    it("a new turn silences the previous reply", async () => {
+      await speaking();
+      const cancelled = synth.cancelCount;
+      type("Next question");
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+      });
+      expect(synth.cancelCount).toBeGreaterThan(cancelled);
+    });
+
+    it("starting a new conversation stops it", async () => {
+      await speaking();
+      const cancelled = synth.cancelCount;
+      fireEvent.click(
+        screen.getAllByRole("button", { name: "Start a new conversation" })[0],
+      );
+      expect(synth.cancelCount).toBeGreaterThan(cancelled);
+    });
+
+    it("leaving the page (pagehide) stops it", async () => {
+      await speaking();
+      const cancelled = synth.cancelCount;
+      act(() => {
+        window.dispatchEvent(new Event("pagehide"));
+      });
+      expect(synth.cancelCount).toBeGreaterThan(cancelled);
+    });
+
+    it("unmounting stops it", async () => {
+      const view = setup();
+      fireEvent.click(toggle());
+      await send("Hello");
+      await screen.findByText(/Answer to: Hello/);
+      const cancelled = synth.cancelCount;
+      view.unmount();
+      expect(synth.cancelCount).toBeGreaterThan(cancelled);
+    });
+
+    it("starting a recording stops it", async () => {
+      const fetchMock = vi.fn(() => new Promise<Response>(() => undefined));
+      vi.stubGlobal("fetch", fetchMock);
+      const media = installMedia();
+      try {
+        await speaking();
+        const cancelled = synth.cancelCount;
+        await act(async () => {
+          fireEvent.click(screen.getByRole("button", { name: "Speak" }));
+        });
+        expect(synth.cancelCount).toBeGreaterThan(cancelled);
+        expect(
+          screen.getByRole("button", { name: "Listen to reply 1" }),
+        ).toBeInTheDocument();
+      } finally {
+        media.uninstall();
+      }
+    });
+  });
+
+  describe("network voices", () => {
+    it("are explained, and nothing is spoken until the visitor agrees", async () => {
+      setup([NETWORK]);
+      expect(
+        screen.getByText("Only a network voice is available"),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText(/may send the text of each reply to a speech service/),
+      ).toBeInTheDocument();
+
+      fireEvent.click(toggle());
+      await send("Hello");
+      await screen.findByText(/Answer to: Hello/);
+      expect(synth.spoken).toHaveLength(0); // automatic reading waits for the yes
+
+      fireEvent.click(listen());
+      expect(synth.spoken).toHaveLength(0); // so does Listen
+      expect(
+        screen.getByText(/Agree to it under Synthesized voice first/),
+      ).toBeInTheDocument();
+    });
+
+    it("are used after an explicit opt-in, and the page keeps saying so", async () => {
+      setup([NETWORK]);
+      fireEvent.click(
+        screen.getByRole("button", { name: "Use the network voice" }),
+      );
+      expect(
+        screen.getByText(/Using a network voice: the reply text may be sent/),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByText("Only a network voice is available"),
+      ).toBeNull();
+
+      await send("Hello");
+      await screen.findByText(/Answer to: Hello/);
+      fireEvent.click(listen());
+
+      expect(synth.spoken[0].voice).toBe(NETWORK);
+    });
+
+    it("are not offered when a local voice exists, and the local one is used", async () => {
+      setup([NETWORK, LOCAL]);
+      expect(
+        screen.queryByText("Only a network voice is available"),
+      ).toBeNull();
+      await send("Hello");
+      await screen.findByText(/Answer to: Hello/);
+      fireEvent.click(listen());
+      expect(synth.spoken[0].voice).toBe(LOCAL);
+    });
+
+    it("never claims that the voice is always local", () => {
+      setup([LOCAL]);
+      const text = document.body.textContent ?? "";
+      expect(text).not.toMatch(/always (runs )?local|never leaves/i);
+      expect(text).toContain(
+        "Your browser reports the voice it uses as running on this device",
+      );
+    });
+  });
+
+  describe("when speech is not available", () => {
+    it("shows no controls and the chat still works if there is no voice at all", async () => {
+      setup([]);
+      expect(
+        screen.queryByRole("heading", { name: "Synthesized voice" }),
+      ).toBeNull();
+      await send("Hello");
+      expect(await screen.findByText(/Answer to: Hello/)).toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: /Listen to reply/ }),
+      ).toBeNull();
+    });
+
+    it("shows no controls and the chat still works when the browser has no speech synthesis", async () => {
+      resetSpeechOutput();
+      render(<ChatPanel />); // jsdom has none
+      expect(
+        screen.queryByRole("heading", { name: "Synthesized voice" }),
+      ).toBeNull();
+      await send("Hello");
+      expect(await screen.findByText(/Answer to: Hello/)).toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: /Listen to reply/ }),
+      ).toBeNull();
+    });
+
+    it("shows the controls once voices load late", async () => {
+      setup([]);
+      expect(
+        screen.queryByRole("heading", { name: "Synthesized voice" }),
+      ).toBeNull();
+      act(() => synth.setVoices([LOCAL]));
+      expect(
+        screen.getByRole("heading", { name: "Synthesized voice" }),
+      ).toBeInTheDocument();
+    });
+  });
+
+  describe("accessibility", () => {
+    it("has no axe violations with the controls, a network notice and Listen buttons", async () => {
+      const view = setup([NETWORK]);
+      await send("Hello");
+      await screen.findByText(/Answer to: Hello/);
+      await expectNoA11yViolations(view.container);
+
+      fireEvent.click(
+        screen.getByRole("button", { name: "Use the network voice" }),
+      );
+      await expectNoA11yViolations(view.container);
+    });
+
+    it("uses native, labelled controls that a keyboard can reach", async () => {
+      setup();
+      await send("Hello");
+      await screen.findByText(/Answer to: Hello/);
+      expect(toggle().tagName).toBe("INPUT");
+      expect(toggle()).toHaveAttribute("type", "checkbox");
+      const button = listen();
+      expect(button.tagName).toBe("BUTTON");
+      expect(button).toHaveAttribute("type", "button");
+      expect(button).not.toHaveAttribute("tabindex", "-1");
+      expect(button.getAttribute("aria-label")).toContain(
+        button.textContent ?? "",
+      );
+    });
   });
 });
