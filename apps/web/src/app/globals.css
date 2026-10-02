@@ -66,33 +66,93 @@ body {
 }
 
 /*
- * The voice orb. Motion is decoration only (state is always also written as text) and runs only
- * when the visitor has not asked for reduced motion.
+ * The voice orb. Motion is decoration only (the state is always also a glyph and written text)
+ * and runs only when the visitor has not asked for reduced motion. SVG shapes turn and scale
+ * around their own centre.
  */
+.orb-breathe,
+.orb-pulse,
+.orb-spin,
+.orb-steps,
+.orb-ripple,
+.orb-bar-idle {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.orb-bar-idle {
+  transform-origin: center bottom;
+}
+
 @keyframes orb-breathe {
   0%,
   100% {
     transform: scale(1);
-    opacity: 0.55;
   }
   50% {
-    transform: scale(1.12);
-    opacity: 0.2;
+    transform: scale(1.035);
   }
 }
 
-@keyframes orb-orbit {
+@keyframes orb-pulse {
+  0% {
+    transform: scale(0.96);
+    opacity: 0.6;
+  }
+  100% {
+    transform: scale(1.12);
+    opacity: 0;
+  }
+}
+
+@keyframes orb-turn {
   to {
     transform: rotate(360deg);
   }
 }
 
+@keyframes orb-ripple {
+  0% {
+    transform: scale(1);
+    opacity: 0.55;
+  }
+  100% {
+    transform: scale(1.32);
+    opacity: 0;
+  }
+}
+
+@keyframes orb-bar {
+  from {
+    transform: scaleY(0.6);
+  }
+  to {
+    transform: scaleY(2.2);
+  }
+}
+
 @media (prefers-reduced-motion: no-preference) {
   .orb-breathe {
-    animation: orb-breathe 2.4s ease-in-out infinite;
+    animation: orb-breathe 5.5s ease-in-out infinite;
   }
 
-  .orb-orbit {
-    animation: orb-orbit 3.2s linear infinite;
+  .orb-pulse {
+    animation: orb-pulse 3s ease-out infinite;
+  }
+
+  .orb-spin {
+    animation: orb-turn 2.4s linear infinite;
+  }
+
+  .orb-steps {
+    animation: orb-turn 3.6s steps(12) infinite;
+  }
+
+  .orb-ripple {
+    animation: orb-ripple 2.1s ease-out infinite;
+  }
+
+  .orb-bar-idle {
+    animation: orb-bar 0.9s ease-in-out infinite alternate;
   }
 }

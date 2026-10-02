@@ -138,7 +138,7 @@ describe("chooseVoice", () => {
 describe("a browser without speech synthesis", () => {
   it("is unsupported, never throws and never speaks", () => {
     const out = createSpeechOutput(undefined, undefined);
-    expect(out.getSnapshot()).toBe(UNSUPPORTED);
+    expect(out.getSnapshot()).toEqual(UNSUPPORTED);
     expect(out.speak("a", "Hello")).toBe("unavailable");
     expect(() => {
       out.stop();

@@ -13,7 +13,7 @@ import {
 import type { Turn } from "@/app/assistant/state";
 import { MAX_MESSAGE_LENGTH } from "@/lib/agent-message";
 import { MAX_RECORDING_MS } from "@/lib/voice/limits";
-import { STAGE_COPY, type StageKind } from "@/lib/voice/stage";
+import { stageCopy, type StageKind } from "@/lib/voice/stage";
 import { formatClock, useVoiceCapture } from "@/lib/voice/use-voice-capture";
 import { deniedCopy, problemCopy, VOICE_WORDING } from "@/lib/voice/voice-copy";
 
@@ -64,6 +64,13 @@ type VoiceStageProps = {
   onSwitchToText: () => void;
   /** Placed after the stage, for example the voice settings link. */
   footer?: ReactNode;
+  /** What is heard is sent without a review (the default). */
+  autoSend: boolean;
+  /**
+   * The same messages are on screen in the transcript panel, so the card here is hidden from
+   * assistive technology to keep them from being announced twice.
+   */
+  exchangeHidden: boolean;
 };
 
 /**
@@ -96,6 +103,8 @@ export function VoiceStage({
   review,
   onSwitchToText,
   footer,
+  autoSend,
+  exchangeHidden,
 }: VoiceStageProps) {
   const capture = useVoiceCapture({ onTranscript, onRecordingStart });
   const hydrated = useSyncExternalStore(
@@ -149,7 +158,7 @@ export function VoiceStage({
     previousStage.current = stage;
   }, [stage]);
 
-  const copy = STAGE_COPY[stage];
+  const copy = stageCopy(stage, autoSend);
   const unsupported = hydrated && !capture.supported;
 
   function primary() {
@@ -263,6 +272,11 @@ export function VoiceStage({
               <Orb
                 stage={stage}
                 small={review !== null && review !== undefined}
+                stream={
+                  capture.state.kind === "recording"
+                    ? capture.state.stream
+                    : null
+                }
               />
               <span
                 className={primaryClass + " group-aria-disabled:opacity-60"}
@@ -432,16 +446,17 @@ export function VoiceStage({
           {stage === "review" ? null : sendingMessage !== null || lastTurn ? (
             <section
               aria-label="Latest exchange"
+              aria-hidden={exchangeHidden || undefined}
               className="w-full space-y-3 rounded-2xl bg-white p-4 text-left shadow-[0_2px_14px_-6px_rgb(15_59_54/0.35)]"
             >
               {sendingMessage !== null ? (
-                <p className="[overflow-wrap:anywhere] whitespace-pre-wrap">
+                <p className="text-sm [overflow-wrap:anywhere] whitespace-pre-wrap text-moss">
                   <span className="font-bold">You said: </span>
                   {sendingMessage}
                 </p>
               ) : lastTurn ? (
                 <>
-                  <p className="[overflow-wrap:anywhere] whitespace-pre-wrap">
+                  <p className="text-sm [overflow-wrap:anywhere] whitespace-pre-wrap text-moss">
                     <span className="font-bold">You said: </span>
                     {lastTurn.message}
                   </p>

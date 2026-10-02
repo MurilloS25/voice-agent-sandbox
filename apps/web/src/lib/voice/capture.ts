@@ -49,6 +49,11 @@ export type Capture = {
   /** Discards the recording: `result` rejects with `cancelled`. */
   cancel(): void;
   readonly result: Promise<Recording>;
+  /**
+   * The stream the recorder is using, so the interface can draw its volume. It is the same
+   * capture: nothing here opens the microphone a second time, and it is stopped with the rest.
+   */
+  readonly stream: MediaStream;
 };
 
 export type CaptureOptions = {
@@ -265,7 +270,7 @@ export async function startCapture(
     recorder.start(); // no timeslice: one playable Blob when it stops
   } catch {
     fail("failed");
-    return { stop: () => undefined, cancel: () => undefined, result };
+    return { stop: () => undefined, cancel: () => undefined, result, stream };
   }
   limitTimer = setTimeout(() => {
     autoStopped = true;
@@ -281,5 +286,6 @@ export async function startCapture(
       else stopRecorder();
     },
     result,
+    stream,
   };
 }

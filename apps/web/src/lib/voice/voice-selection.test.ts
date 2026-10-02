@@ -138,6 +138,7 @@ describe("settings", () => {
 
   it("reads a valid stored value", () => {
     expect(parseSettings('{"voiceName":"Nice","rate":1.1}')).toEqual({
+      ...DEFAULT_SETTINGS,
       voiceName: "Nice",
       rate: 1.1,
     });
@@ -155,10 +156,12 @@ describe("settings", () => {
 
   it("repairs each invalid field on its own", () => {
     expect(parseSettings('{"voiceName":5,"rate":1.1}')).toEqual({
+      ...DEFAULT_SETTINGS,
       voiceName: null,
       rate: 1.1,
     });
     expect(parseSettings('{"voiceName":"Ok","rate":9}')).toEqual({
+      ...DEFAULT_SETTINGS,
       voiceName: "Ok",
       rate: DEFAULT_SETTINGS.rate,
     });
@@ -173,6 +176,35 @@ describe("settings", () => {
   it("ignores extra fields, so a conversation could never ride along", () => {
     expect(
       parseSettings('{"voiceName":"Ok","rate":1,"messages":["hi"]}'),
-    ).toEqual({ voiceName: "Ok", rate: 1 });
+    ).toEqual({ ...DEFAULT_SETTINGS, voiceName: "Ok", rate: 1 });
+  });
+});
+
+describe("network agreement and review preference", () => {
+  it("keeps an agreement only for the voice that was picked and agreed to", () => {
+    expect(
+      parseSettings('{"voiceName":"Net","consentVoice":"Net","rate":1}')
+        .consentVoice,
+    ).toBe("Net");
+    // An agreement for another voice, or without a pick, is dropped.
+    expect(
+      parseSettings('{"voiceName":"Net","consentVoice":"Other"}').consentVoice,
+    ).toBeNull();
+    expect(parseSettings('{"consentVoice":"Net"}').consentVoice).toBeNull();
+    expect(
+      parseSettings('{"voiceName":"Net","consentVoice":5}').consentVoice,
+    ).toBeNull();
+  });
+
+  it("reads the review preference only when it is exactly true, and defaults to off", () => {
+    expect(DEFAULT_SETTINGS.reviewBeforeSending).toBe(false);
+    expect(
+      parseSettings('{"reviewBeforeSending":true}').reviewBeforeSending,
+    ).toBe(true);
+    for (const bad of ['"yes"', "1", "null", "[]", "{}"]) {
+      expect(
+        parseSettings(`{"reviewBeforeSending":${bad}}`).reviewBeforeSending,
+      ).toBe(false);
+    }
   });
 });

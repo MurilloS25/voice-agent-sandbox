@@ -26,12 +26,16 @@ import {
 } from "@/lib/voice/stage";
 import { useSpeechOutput } from "@/lib/voice/use-speech-output";
 
-import { AssistantWelcome, WELCOME_TEXT } from "./AssistantWelcome";
+import {
+  AssistantWelcome,
+  VOICE_READY_TEXT,
+  WELCOME_TEXT,
+} from "./AssistantWelcome";
 import { ExecutionTimeline } from "./ExecutionTimeline";
 import { SecondaryPanel } from "./SecondaryPanel";
 import { ReviewBlock, Transcript, type ReviewAgain } from "./Transcript";
 import { VoiceInput, type VoiceControl } from "./VoiceInput";
-import { VoiceSettings } from "./VoiceSettings";
+import { NETWORK_VOICE_EXPLANATION, VoiceSettings } from "./VoiceSettings";
 import { VoiceStage } from "./VoiceStage";
 
 export type AssistantMode = "voice" | "text";
@@ -201,14 +205,15 @@ export function ChatPanel({
   // Spoken replies. The network-voice agreement lives in memory only; refs mirror what the async
   // code reads after a turn comes back.
   const { output: speech, snapshot: speechState } = useSpeechOutput();
-  const [networkConsent, setNetworkConsent] = useState(false);
+  // The network voice the visitor agreed to on this page, by exact name. (An agreement to a voice
+  // they picked themselves is also remembered by the speech controller, in this browser.)
+  const [consentedName, setConsentedName] = useState<string | null>(null);
   const [speechNote, setSpeechNote] = useState("");
-  const consentRef = useRef(false);
-  // Replies are read automatically only while the voice session is on and Voice is showing.
-  const autoReadRef = useRef(false);
-  useEffect(() => {
-    autoReadRef.current = mode === "voice" && sessionActive;
-  }, [mode, sessionActive]);
+  const consentedRef = useRef<string | null>(null);
+  // True only while a voice session is on and Voice is showing: replies are read automatically,
+  // and a transcript may be sent automatically. Kept in a ref and changed in the handlers, so a
+  // callback that fires right after leaving Voice already sees it.
+  const voiceLiveRef = useRef(false);
 
   const inFlight = useRef(false);
   const noticeRef = useRef<HTMLDivElement>(null);
@@ -240,9 +245,16 @@ export function ChatPanel({
    * automatic reading counts as done only once the browser reports that it started; a refusal
    * or a failure leaves the reply unread and the stage offers to read it.
    */
+  function allowNetwork(): boolean {
+    const { choice } = speech.getSnapshot();
+    return (
+      choice.kind === "network" && consentedRef.current === choice.voice.name
+    );
+  }
+
   function speakReply(id: string, text: string, automatic: boolean) {
     const result = speech.speak(id, text, {
-      allowNetwork: consentRef.current,
+      allowNetwork: allowNetwork(),
       onStart: () => {
         setUnheard((current) => (current?.id === id ? null : current));
       },
@@ -333,6 +345,33 @@ export function ChatPanel({
   /** The transcript joins what is already typed. It is never sent from here: only Send sends. */
   function addTranscript(text: string) {
     const heard = text.trim();
+    // Voice, with "Review transcript before sending" off: a heard sentence goes straight on as
+    // the next turn. Anything that cannot be sent safely falls back to the review below.
+    if (
+      mode === "voice" &&
+      voiceLiveRef.current &&
+      !speech.getSnapshot().settings.reviewBeforeSending &&
+      !transcriptPending &&
+      draft.trim() === ""
+    ) {
+      if (heard === "") {
+        setSpeechNote("I didn't hear anything. Tap to speak to try again.");
+        return;
+      }
+      const sendable =
+        !inFlight.current &&
+        !pending &&
+        (phase.kind === "idle" ||
+          phase.kind === "rejected" ||
+          phase.kind === "invalid") &&
+        turns.length < MAX_TURN_INDEX &&
+        normalizeMessage(heard) !== undefined;
+      if (sendable) {
+        setSpeechNote("");
+        submit(false, heard);
+        return;
+      }
+    }
     // In the voice review the transcript is the whole message: Record again replaces it, edits
     // included. It is replaced only now that a new one has arrived, so a failed or cancelled
     // recording loses nothing.
@@ -402,7 +441,7 @@ export function ChatPanel({
         setPhase({ kind: "idle", replied: true });
         setFocusTurn(outcome.turn.turn_index);
         // Only while the voice session is on, and only for an assistant reply that is new.
-        if (autoReadRef.current && outcome.turn.reply.source === "assistant") {
+        if (voiceLiveRef.current && outcome.turn.reply.source === "assistant") {
           speakReply(
             `current-${outcome.turn.turn_index}`,
             outcome.turn.reply.text,
@@ -434,7 +473,7 @@ export function ChatPanel({
     }
   }
 
-  function submit(afterUnavailable = false) {
+  function submit(afterUnavailable = false, spoken?: string) {
     if (inFlight.current || pending) return;
     if (phase.kind === "ended") return;
     if (phase.kind === "unavailable" && !afterUnavailable) return;
@@ -443,7 +482,7 @@ export function ChatPanel({
       setPhase({ kind: "ended", reason: "limit" });
       return;
     }
-    const message = normalizeMessage(draft);
+    const message = normalizeMessage(spoken ?? draft);
     if (message === undefined) {
       setPhase({ kind: "invalid" });
       return;
@@ -519,10 +558,17 @@ export function ChatPanel({
    * turns on automatic reading of replies that arrive from now on, and it never records.
    */
   function startSession() {
+    voiceLiveRef.current = true;
     setSessionActive(true);
-    const result = speech.speak(WELCOME_SPEECH_ID, WELCOME_TEXT, {
-      allowNetwork: consentRef.current,
-    });
+    // The full introduction only for a conversation that has not begun. With real messages the
+    // assistant does not introduce itself again, reads nothing from the history, and says only
+    // that voice mode is ready. (The welcome card is not a message.)
+    const fresh = turns.length === 0 && pending === null;
+    const result = speech.speak(
+      WELCOME_SPEECH_ID,
+      fresh ? WELCOME_TEXT : VOICE_READY_TEXT,
+      { allowNetwork: allowNetwork() },
+    );
     if (result === "needs_consent") {
       setSpeechNote(
         "Only a network voice is available, so the welcome and the replies are not read aloud until you agree to it.",
@@ -532,8 +578,13 @@ export function ChatPanel({
     }
   }
 
-  /** Ends the voice session: speech stops, automatic reading is off, the conversation stays. */
+  /**
+   * Ends the voice session: speech and any recording stop, nothing that was waiting is sent, and
+   * the conversation and the review stay. A turn already on its way finishes normally but is not
+   * read aloud.
+   */
   function endSession() {
+    voiceLiveRef.current = false;
     speech.stop();
     voice.current?.cancel();
     discardTranscript();
@@ -543,7 +594,9 @@ export function ChatPanel({
 
   function chooseMode(next: AssistantMode) {
     if (next === mode) return;
-    speech.stop(); // leaving one mode never leaves the other talking
+    // Leaving Voice ends the voice session; coming back needs Start again.
+    if (mode === "voice") endSession();
+    else speech.stop();
     setMode(next);
     if (next === "text" && panel === "transcript") setPanel(null);
   }
@@ -660,7 +713,15 @@ export function ChatPanel({
       </Notice>
     ) : null;
 
-  /** A network voice is the only one that works, and the visitor has not agreed to it. */
+  const selectedNetworkName =
+    speechState.choice.kind === "network"
+      ? speechState.choice.voice.name
+      : null;
+  const networkConsent =
+    selectedNetworkName !== null &&
+    (consentedName === selectedNetworkName || speechState.networkConsented);
+
+  /** A network voice is the one in use, and the visitor has not agreed to it. */
   const needsConsent =
     speechState.supported &&
     speechState.choice.kind === "network" &&
@@ -671,24 +732,31 @@ export function ChatPanel({
       <div className="space-y-2 rounded-2xl border-l-8 border-rust bg-white p-3">
         <p className="font-bold text-rust">Replies are not read aloud yet</p>
         <p className="text-sm">
-          The selected voice is a network voice: it may send the text of each
-          reply to a speech service run by your browser or operating system.
-          Nothing is spoken until you agree.
+          {NETWORK_VOICE_EXPLANATION} Nothing is spoken until you agree.
         </p>
         <button
           type="button"
           onClick={consent}
           className={secondaryButtonClass}
         >
-          Use the network voice
+          Use network voice
         </button>
       </div>
     ) : null;
 
   function consent() {
-    consentRef.current = true;
-    setNetworkConsent(true);
+    if (selectedNetworkName === null) return;
+    consentedRef.current = selectedNetworkName;
+    setConsentedName(selectedNetworkName);
+    speech.agreeToNetworkVoice(); // remembered only if the visitor picked this voice themselves
     setSpeechNote("");
+  }
+
+  function withdrawConsent() {
+    consentedRef.current = null;
+    setConsentedName(null);
+    speech.withdrawNetworkVoice();
+    speech.stop();
   }
 
   // --- pieces shared by the surfaces ------------------------------------------------------
@@ -762,12 +830,15 @@ export function ChatPanel({
     <VoiceSettings
       snapshot={speechState}
       networkConsent={networkConsent}
+      networkConsentRemembered={speechState.networkConsented}
       onConsent={consent}
+      onWithdraw={withdrawConsent}
       onVoice={(name) => speech.setSettings({ voiceName: name })}
       onRate={(rate) => speech.setSettings({ rate })}
+      onReview={(review) => speech.setSettings({ reviewBeforeSending: review })}
       onPreview={() => {
         const result = speech.speak(PREVIEW_SPEECH_ID, PREVIEW_TEXT, {
-          allowNetwork: consentRef.current,
+          allowNetwork: allowNetwork(),
         });
         setSpeechNote(
           result === "needs_consent"
@@ -877,6 +948,8 @@ export function ChatPanel({
       }
       onSwitchToText={() => chooseMode("text")}
       footer={voiceFooter}
+      autoSend={!speechState.settings.reviewBeforeSending}
+      exchangeHidden={panel === "transcript"}
     />
   );
 

@@ -9,7 +9,7 @@ import { agentTurn, proposal, reviewTurn } from "@/test/fixtures";
 import { fakeVoice, installSpeech, type FakeSynth } from "@/test/speech-fakes";
 import { installMedia, type FakeMedia } from "@/test/voice-fakes";
 
-import { WELCOME_TEXT } from "./AssistantWelcome";
+import { VOICE_READY_TEXT, WELCOME_TEXT } from "./AssistantWelcome";
 import { ChatPanel } from "./ChatPanel";
 
 const { sendTurn, confirmBooking, uuid } = vi.hoisted(() => ({
@@ -76,12 +76,30 @@ function browserFinishesSpeaking() {
   act(() => synth.spoken[synth.spoken.length - 1].onend?.());
 }
 
+const SETTINGS_KEY = "quillwheel.voice-settings.v1";
+
+/**
+ * Most of these tests drive the manual review ("Review transcript before sending" on); the
+ * automatic flow, which is the default, is covered with `review: false`.
+ */
 function setup(
   props: {
     initialMode?: "voice" | "text";
     voices?: SpeechSynthesisVoice[];
+    /** Manual review of the transcript. Default here is on; pass false for the product default. */
+    review?: boolean;
   } = {},
 ) {
+  if (props.review !== false && localStorage.getItem(SETTINGS_KEY) === null) {
+    localStorage.setItem(
+      SETTINGS_KEY,
+      JSON.stringify({
+        voiceName: null,
+        rate: 0.95,
+        reviewBeforeSending: true,
+      }),
+    );
+  }
   synth = installSpeech(props.voices ?? [LOCAL]);
   resetSpeechOutput(); // the controller reads the browser (and its storage) again
   return render(<ChatPanel initialMode={props.initialMode} />);
@@ -254,7 +272,8 @@ describe("Start voice assistant", () => {
     await press("Voice");
     await press("Start voice assistant");
 
-    expect(synth.texts).toEqual([WELCOME_TEXT]); // the earlier reply stays silent
+    // No second introduction, and the earlier reply stays silent.
+    expect(synth.texts).toEqual([VOICE_READY_TEXT]);
   });
 
   it("never needs a second Start while the page lives, but a new page does", () => {
@@ -685,7 +704,7 @@ describe("reading replies aloud", () => {
     await screen.findByText(/Answer to: first take/);
     expect(synth.spoken).toHaveLength(0);
 
-    await press("Use the network voice");
+    await press("Use network voice");
     await press("Read reply aloud");
     expect(synth.texts).toEqual(["Answer to: first take"]);
     expect(synth.spoken[0].voice).toBe(NETWORK);
@@ -817,12 +836,15 @@ describe("Voice and Text share one conversation", () => {
     expect(sendTurn).not.toHaveBeenCalled();
   });
 
-  it("keeps a transcript that is waiting when the visitor switches to Text, unsent", async () => {
+  it("cancels a transcript that is waiting when the visitor switches to Text, and sends nothing", async () => {
     setup();
     await startSession();
     await recordUntilReview("first take");
     await press("Text");
-    expect(screen.getByLabelText("Your message")).toHaveValue("first take");
+    expect(screen.getByLabelText("Your message")).toHaveValue("");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
     expect(sendTurn).not.toHaveBeenCalled();
   });
 });
@@ -1001,7 +1023,7 @@ describe("Voice settings", () => {
     const options = within(select)
       .getAllByRole("option")
       .map((o) => o.textContent);
-    expect(options[0]).toContain("Automatic");
+    expect(options[0]).toContain("Recommended");
     expect(options.join("|")).toContain("Fine Natural voice");
     expect(options.join("|")).not.toContain("Español");
     expect(select.value).toBe("");
@@ -1025,6 +1047,8 @@ describe("Voice settings", () => {
     ).toEqual({
       voiceName: "Local voice",
       rate: 1.2,
+      consentVoice: null,
+      reviewBeforeSending: true,
     });
 
     await press("Preview voice");
@@ -1120,14 +1144,14 @@ describe("Voice settings", () => {
     const names = within(screen.getByLabelText("Voice"))
       .getAllByRole("option")
       .map((o) => o.textContent);
-    expect(names.join("|")).toContain("Network voice (en-US) — network voice");
+    expect(names.join("|")).toContain("Network voice (en-US) — Network voice");
     fireEvent.change(screen.getByLabelText("Voice"), {
       target: { value: "Network voice" },
     });
     expect(screen.getByText("You picked a network voice")).toBeInTheDocument();
     await press("Preview voice");
     expect(synth.spoken).toHaveLength(0);
-    await press("Use the network voice");
+    await press("Use network voice");
     await press("Preview voice");
     expect(synth.spoken[0].voice).toBe(NETWORK);
   });
@@ -1159,6 +1183,10 @@ describe("when voice is not available", () => {
     vi.stubGlobal("fetch", fetchMock);
     media.uninstall();
     media = installMedia();
+    localStorage.setItem(
+      SETTINGS_KEY,
+      JSON.stringify({ reviewBeforeSending: true }),
+    );
     resetSpeechOutput();
     render(<ChatPanel />);
     await press("Start voice assistant");

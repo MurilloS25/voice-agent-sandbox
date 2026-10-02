@@ -1291,7 +1291,7 @@ describe("ChatPanel: spoken replies", () => {
         screen.getByText("Only a network voice is available"),
       ).toBeInTheDocument();
       expect(
-        screen.getByText(/may send the text of each reply to a speech service/),
+        screen.getByText(/may send the text to your browser’s voice provider/),
       ).toBeInTheDocument();
 
       await send("Hello");
@@ -1307,11 +1307,9 @@ describe("ChatPanel: spoken replies", () => {
       setup([NETWORK]);
       openSettings();
       fireEvent.click(
-        screen.getByRole("button", { name: "Use the network voice" }),
+        screen.getByRole("button", { name: "Use network voice" }),
       );
-      expect(
-        screen.getByText(/Using a network voice: the reply text may be sent/),
-      ).toBeInTheDocument();
+      expect(screen.getByText(/Using a network voice\./)).toBeInTheDocument();
       expect(
         screen.queryByText("Only a network voice is available"),
       ).toBeNull();
@@ -1390,7 +1388,7 @@ describe("ChatPanel: spoken replies", () => {
       await expectNoA11yViolations(view.container);
 
       fireEvent.click(
-        screen.getByRole("button", { name: "Use the network voice" }),
+        screen.getByRole("button", { name: "Use network voice" }),
       );
       await expectNoA11yViolations(view.container);
     });

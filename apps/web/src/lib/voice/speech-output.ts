@@ -151,8 +151,10 @@ export type SpeechSnapshot = {
   speakingId: string | null;
   /** The English voices the picker offers, local ones first. */
   voices: readonly VoiceOption[];
-  /** The visitor's voice and speed. Only these two are ever stored. */
+  /** The visitor's voice, speed and review choice: the only things ever stored. */
   settings: VoiceSettings;
+  /** The selected voice is a network voice the visitor explicitly picked and agreed to use. */
+  networkConsented: boolean;
 };
 
 export type SpeakResult =
@@ -170,8 +172,16 @@ export type SpeechOutput = {
   speak(id: string, text: string, options?: SpeakOptions): SpeakResult;
   /** Picks a voice and/or speed. Stored, if storage is available, and applied to the next speech. */
   setSettings(change: Partial<VoiceSettings>): void;
-  /** Back to the automatic voice and the default speed, and forgets what was stored. */
+  /** Back to the recommended voice and the defaults, and forgets what was stored. */
   resetSettings(): void;
+  /**
+   * The visitor agreed to use the voice now selected, a network voice. When they picked that
+   * voice themselves the agreement is remembered in this browser (by exact name); for an
+   * automatic choice it is not, and the caller keeps it for the page only.
+   */
+  agreeToNetworkVoice(): void;
+  /** Forgets a remembered agreement. */
+  withdrawNetworkVoice(): void;
   /** Stops speaking at once. Safe to call at any time. */
   stop(): void;
   /** Stops speaking and detaches from the browser. */
@@ -198,6 +208,7 @@ export const UNSUPPORTED: SpeechSnapshot = {
   speakingId: null,
   voices: [],
   settings: DEFAULT_SETTINGS,
+  networkConsented: false,
 };
 
 type SettingsStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
@@ -231,14 +242,48 @@ export function createSpeechOutput(
   storage?: SettingsStorage,
 ): SpeechOutput {
   if (!synth || !Utterance) {
+    // Nothing can be spoken, but the visitor's other choices (for example whether to review a
+    // transcript before sending it) still work and are still remembered.
+    const quiet = new Set<() => void>();
+    let settings = DEFAULT_SETTINGS;
+    try {
+      settings = parseSettings(storage?.getItem(SETTINGS_KEY) ?? null);
+    } catch {
+      // storage refused: the defaults apply
+    }
+    let current: SpeechSnapshot = { ...UNSUPPORTED, settings };
+    const change = (next: VoiceSettings, persist: boolean) => {
+      try {
+        if (persist) storage?.setItem(SETTINGS_KEY, JSON.stringify(next));
+        else storage?.removeItem(SETTINGS_KEY);
+      } catch {
+        // not stored
+      }
+      current = { ...current, settings: next };
+      quiet.forEach((listener) => listener());
+    };
     return {
-      getSnapshot: () => UNSUPPORTED,
-      subscribe: () => () => undefined,
+      getSnapshot: () => current,
+      subscribe(listener) {
+        quiet.add(listener);
+        return () => quiet.delete(listener);
+      },
       speak: () => "unavailable",
-      setSettings: () => undefined,
-      resetSettings: () => undefined,
+      setSettings: (patch) =>
+        change(
+          {
+            ...current.settings,
+            ...patch,
+            rate: clampRate((patch.rate ?? current.settings.rate) as number),
+            consentVoice: null,
+          },
+          true,
+        ),
+      resetSettings: () => change(DEFAULT_SETTINGS, false),
+      agreeToNetworkVoice: () => undefined,
+      withdrawNetworkVoice: () => undefined,
       stop: () => undefined,
-      dispose: () => undefined,
+      dispose: () => quiet.clear(),
     };
   }
 
@@ -253,11 +298,19 @@ export function createSpeechOutput(
   const describe = (
     voices: SpeechSynthesisVoice[],
     settings: VoiceSettings,
-  ) => ({
-    choice: chooseVoice(voices, settings.voiceName),
-    voices: voiceOptions(voices),
-    settings,
-  });
+  ) => {
+    const choice = chooseVoice(voices, settings.voiceName);
+    return {
+      choice,
+      voices: voiceOptions(voices),
+      settings,
+      networkConsented:
+        choice.kind === "network" &&
+        settings.consentVoice !== null &&
+        settings.consentVoice === choice.voice.name &&
+        settings.voiceName === choice.voice.name,
+    };
+  };
   let snapshot: SpeechSnapshot = {
     supported: true,
     speakingId: null,
@@ -302,15 +355,43 @@ export function createSpeechOutput(
     },
     setSettings(change) {
       const next = { ...snapshot.settings, ...change };
-      changeSettings({ ...next, rate: clampRate(next.rate) }, true);
+      changeSettings(
+        {
+          ...next,
+          rate: clampRate(next.rate),
+          // An agreement belongs to one voice: picking another one ends it.
+          consentVoice:
+            next.consentVoice !== null && next.consentVoice === next.voiceName
+              ? next.consentVoice
+              : null,
+        },
+        true,
+      );
     },
     resetSettings() {
       changeSettings(DEFAULT_SETTINGS, false);
     },
+    agreeToNetworkVoice() {
+      const { choice, settings } = snapshot;
+      if (choice.kind !== "network") return;
+      if (settings.voiceName === choice.voice.name) {
+        changeSettings({ ...settings, consentVoice: choice.voice.name }, true);
+      }
+    },
+    withdrawNetworkVoice() {
+      if (snapshot.settings.consentVoice === null) return;
+      changeSettings({ ...snapshot.settings, consentVoice: null }, true);
+    },
     speak(id, text, { allowNetwork = false, onStart, onError } = {}) {
       const { choice } = snapshot;
       if (choice.kind === "none") return "unavailable";
-      if (choice.kind === "network" && !allowNetwork) return "needs_consent";
+      if (
+        choice.kind === "network" &&
+        !allowNetwork &&
+        !snapshot.networkConsented
+      ) {
+        return "needs_consent";
+      }
       // Dates are made speakable first, so a date is never cut up or read digit by digit.
       const chunks = splitForSpeech(prepareTextForSpeech(text));
       if (chunks.length === 0) return "unavailable";

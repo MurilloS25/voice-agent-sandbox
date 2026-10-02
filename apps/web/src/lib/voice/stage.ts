@@ -70,6 +70,38 @@ export const STAGE_COPY: Record<
   },
 };
 
+/**
+ * The words for a state. With automatic sending (the default) the visitor is told that what they
+ * say is sent as soon as it is transcribed, so the jump from Transcribing to Thinking is no
+ * surprise.
+ */
+export function stageCopy(
+  stage: StageKind,
+  autoSend: boolean,
+): (typeof STAGE_COPY)[StageKind] {
+  const base = STAGE_COPY[stage];
+  if (!autoSend) return base;
+  if (stage === "ready") {
+    return {
+      ...base,
+      hint: "Ask about services, open times or a booking. What you say is sent when it is transcribed.",
+    };
+  }
+  if (stage === "transcribing") {
+    return {
+      ...base,
+      hint: "Turning your recording into text. It is sent as soon as it is ready.",
+    };
+  }
+  if (stage === "thinking") {
+    return {
+      ...base,
+      hint: "I heard you and sent it. Waiting for the assistant's reply.",
+    };
+  }
+  return base;
+}
+
 /** The spoken welcome's visible text lives with the welcome component; this is its identity. */
 export const WELCOME_SPEECH_ID = "welcome";
 export const PREVIEW_SPEECH_ID = "preview";

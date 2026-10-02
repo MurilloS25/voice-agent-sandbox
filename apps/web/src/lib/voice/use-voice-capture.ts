@@ -22,7 +22,7 @@ import { transcribeClip, probeVoice } from "./transcribe";
 export type CaptureState =
   | { kind: "idle" }
   | { kind: "requesting_permission" }
-  | { kind: "recording" }
+  | { kind: "recording"; stream: MediaStream | null }
   | { kind: "transcribing"; autoStopped: boolean }
   | { kind: "review" } // the transcript has been handed over and waits to be checked
   | { kind: "denied" }
@@ -170,7 +170,7 @@ export function useVoiceCapture({
     capture.current = active;
     startedAt.current = Date.now();
     setElapsedMs(0);
-    setState({ kind: "recording" });
+    setState({ kind: "recording", stream: active.stream ?? null });
 
     let clip: Blob | null;
     let autoStopped: boolean;

@@ -11,10 +11,17 @@
  */
 
 export type VoiceSettings = {
-  /** The voice the visitor picked, or null for the automatic choice. */
+  /** The voice the visitor picked, or null for the recommended choice. */
   voiceName: string | null;
   /** Speaking rate, 1 being normal speed. */
   rate: number;
+  /**
+   * The network voice the visitor explicitly picked and then agreed to use, by exact name. It
+   * counts only while that same voice is the selected one. Never set for an automatic choice.
+   */
+  consentVoice: string | null;
+  /** Show the transcript for checking before it is sent. Off: a heard sentence is sent. */
+  reviewBeforeSending: boolean;
 };
 
 export const MIN_RATE = 0.75;
@@ -31,6 +38,8 @@ export const SPEECH_DEFAULTS = {
 export const DEFAULT_SETTINGS: VoiceSettings = {
   voiceName: null,
   rate: SPEECH_DEFAULTS.rate,
+  consentVoice: null,
+  reviewBeforeSending: false,
 };
 
 export type VoiceChoice =
@@ -154,14 +163,23 @@ export function parseSettings(raw: string | null): VoiceSettings {
   if (typeof data !== "object" || data === null || Array.isArray(data)) {
     return DEFAULT_SETTINGS;
   }
-  const { voiceName, rate } = data as Record<string, unknown>;
+  const { voiceName, rate, consentVoice, reviewBeforeSending } = data as Record<
+    string,
+    unknown
+  >;
+  const name = (value: unknown) =>
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= MAX_NAME_LENGTH
+      ? value
+      : null;
+  const picked = name(voiceName);
   return {
-    voiceName:
-      typeof voiceName === "string" &&
-      voiceName.length > 0 &&
-      voiceName.length <= MAX_NAME_LENGTH
-        ? voiceName
-        : null,
+    voiceName: picked,
+    // An agreement is only meaningful for the voice that was explicitly picked.
+    consentVoice:
+      picked !== null && name(consentVoice) === picked ? picked : null,
+    reviewBeforeSending: reviewBeforeSending === true,
     rate:
       typeof rate === "number" &&
       Number.isFinite(rate) &&

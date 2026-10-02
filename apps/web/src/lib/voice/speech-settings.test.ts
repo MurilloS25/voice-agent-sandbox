@@ -23,6 +23,12 @@ afterEach(() => {
 });
 
 const KEY = "quillwheel.voice-settings.v1";
+const DEFAULTS = {
+  voiceName: null,
+  rate: 0.95,
+  consentVoice: null,
+  reviewBeforeSending: false,
+};
 const PLAIN = fakeVoice({ name: "Plain" });
 const NATURAL = fakeVoice({ name: "Fine Natural" });
 
@@ -46,7 +52,7 @@ describe("voices and settings", () => {
     const snap = createSpeechOutput(synth, FakeUtterance).getSnapshot();
     expect(snap.voices.map((v) => v.name)).toEqual(["Fine Natural", "Plain"]);
     expect(snap.choice).toEqual({ kind: "local", voice: NATURAL });
-    expect(snap.settings).toEqual({ voiceName: null, rate: 0.95 });
+    expect(snap.settings).toEqual(DEFAULTS);
   });
 
   it("reloads the list on voiceschanged and applies a saved choice that appears late", () => {
@@ -83,10 +89,7 @@ describe("voices and settings", () => {
       FakeUtterance,
       storage,
     );
-    expect(out.getSnapshot().settings).toEqual({
-      voiceName: null,
-      rate: 0.95,
-    });
+    expect(out.getSnapshot().settings).toEqual(DEFAULTS);
   });
 
   it("stores only the voice name and the rate, and speaks with them", () => {
@@ -96,6 +99,7 @@ describe("voices and settings", () => {
 
     out.setSettings({ voiceName: "Plain", rate: 1.2 });
     expect(JSON.parse(storage.data.get(KEY) ?? "")).toEqual({
+      ...DEFAULTS,
       voiceName: "Plain",
       rate: 1.2,
     });
@@ -129,10 +133,7 @@ describe("voices and settings", () => {
     );
     out.setSettings({ voiceName: "Plain", rate: 1.2 });
     out.resetSettings();
-    expect(out.getSnapshot().settings).toEqual({
-      voiceName: null,
-      rate: 0.95,
-    });
+    expect(out.getSnapshot().settings).toEqual(DEFAULTS);
     expect(out.getSnapshot().choice).toEqual({
       kind: "local",
       voice: NATURAL,

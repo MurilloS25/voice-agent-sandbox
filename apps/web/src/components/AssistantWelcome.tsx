@@ -8,6 +8,9 @@
 export const WELCOME_TEXT =
   "Hi! I’m Quillwheel’s workshop assistant. I can explain our services, check available times, and prepare a booking for your confirmation. How can I help?";
 
+/** What the voice says when it starts in a conversation that already has messages. */
+export const VOICE_READY_TEXT = "Voice mode is ready.";
+
 /** Each action only fills the message box. The visitor reviews it and presses Send. */
 export const QUICK_ACTIONS = [
   { label: "See available services", draft: "What services do you offer?" },
