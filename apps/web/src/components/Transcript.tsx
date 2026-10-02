@@ -38,6 +38,11 @@ type TranscriptProps = {
   idPrefix: string;
   /** Listen / Stop on assistant replies. Omitted when no voice is available or read-only. */
   playback?: Playback;
+  /**
+   * The live booking review is on another surface (the voice stage), so here it is only
+   * mentioned. Its confirm form is never rendered twice.
+   */
+  liveReviewElsewhere?: boolean;
   /** A plain click on a link back to the assistant (for example "Review again"). */
   onReviewAgain?: (context: ReviewAgain) => void;
 };
@@ -53,7 +58,7 @@ function Mark({ tone }: { tone: Tone }) {
   return (
     <span
       aria-hidden="true"
-      className={`mt-1 flex h-9 w-9 shrink-0 items-center justify-center font-display text-xl leading-none font-extrabold ${
+      className={`mt-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-full font-display text-xl leading-none font-extrabold ${
         tone === "assistant" ? "bg-bottle text-celeste" : "bg-rust text-white"
       }`}
     >
@@ -74,9 +79,10 @@ function Message({
   footer?: ReactNode;
 }) {
   const bubbleClass = {
-    user: "bg-bottle text-primer",
-    assistant: "border-2 border-moss bg-celeste/40",
-    system: "border-2 border-l-8 border-rust bg-white",
+    user: "rounded-2xl rounded-br-md bg-bottle text-cream",
+    assistant:
+      "rounded-2xl rounded-tl-md bg-white shadow-[0_2px_14px_-6px_rgb(15_59_54/0.35)]",
+    system: "rounded-2xl border-l-8 border-rust bg-white",
   }[tone];
   return (
     <div
@@ -117,7 +123,7 @@ function ListenButton({
           ? `Stop reading reply ${turnIndex}`
           : `Listen to reply ${turnIndex}`
       }
-      className="min-h-12 border-2 border-bottle bg-white px-4 py-2 font-bold [overflow-wrap:anywhere] hover:bg-hivis"
+      className="min-h-12 rounded-full border border-bottle/40 bg-white px-5 py-2 font-bold [overflow-wrap:anywhere] hover:bg-celeste/40"
     >
       {speaking ? "Stop" : "Listen"}
     </button>
@@ -132,22 +138,29 @@ function assistantAgainHref(review: Review): string {
   });
 }
 
-function ReviewBlock({
+/**
+ * The schedule service's booking review and, while it is the live one, the unchanged confirm
+ * form. It is rendered once on the page: where the voice stage is showing the live review, the
+ * transcript points to it instead of repeating the form.
+ */
+export function ReviewBlock({
   review,
   live,
   turnIndex,
   onReviewAgain,
+  className = "max-w-2xl sm:ml-12",
 }: {
   review: Review;
   live: boolean;
   turnIndex: number;
   onReviewAgain?: (context: ReviewAgain) => void;
+  className?: string;
 }) {
   const again = assistantAgainHref(review);
   return (
     <section
       aria-label={`Booking review for reply ${turnIndex}`}
-      className="max-w-2xl border-2 border-l-8 border-bottle bg-white p-4 sm:ml-12"
+      className={`rounded-2xl border border-bottle/20 bg-white p-4 shadow-[0_8px_30px_-14px_rgb(15_59_54/0.45)] ${className}`}
       onClick={(event) => {
         // Every plain click on a link back to the assistant is a new request from the visitor,
         // even when the address does not change. The link still navigates as usual.
@@ -211,6 +224,7 @@ export function Transcript({
   focusTurn = null,
   idPrefix,
   playback,
+  liveReviewElsewhere = false,
   onReviewAgain,
 }: TranscriptProps) {
   const root = useRef<HTMLOListElement>(null);
@@ -255,7 +269,16 @@ export function Transcript({
               >
                 {response.reply.text}
               </Message>
-              {review ? (
+              {review &&
+              liveReviewElsewhere &&
+              liveReviewTurn === response.turn_index &&
+              !readOnly ? (
+                <p className="rounded-2xl border border-bottle/20 bg-white p-3 sm:ml-12">
+                  A booking review for reply {response.turn_index} is open on
+                  the voice screen. Nothing is booked until you confirm it
+                  there.
+                </p>
+              ) : review ? (
                 <ReviewBlock
                   review={review}
                   turnIndex={response.turn_index}

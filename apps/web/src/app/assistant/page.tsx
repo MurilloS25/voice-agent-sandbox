@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 
 import { AssistantHeader } from "@/components/AssistantHeader";
 import { ChatPanel } from "@/components/ChatPanel";
@@ -9,6 +9,13 @@ import { firstValue } from "@/lib/search-params";
 
 export const metadata: Metadata = {
   title: "Ask the assistant | Quillwheel Cycle Works",
+};
+
+// Full-height app shell: let the page reach under the notch (the shell pads itself with the safe
+// areas) and keep the layout from jumping when an on-screen keyboard opens.
+export const viewport: Viewport = {
+  viewportFit: "cover",
+  interactiveWidget: "resizes-content",
 };
 
 /**
@@ -42,12 +49,12 @@ export default async function AssistantPage(props: PageProps<"/assistant">) {
   );
 
   return (
-    <>
+    <div className="relative flex h-dvh min-h-[26rem] flex-col overflow-hidden bg-[linear-gradient(180deg,rgb(143_211_206/0.28),var(--color-cream)_55%)] pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)]">
       <AssistantHeader />
-      <main className="mx-auto w-full max-w-6xl space-y-6 px-4 py-6 sm:px-8 sm:py-8">
-        <DemoBanner />
+      <DemoBanner compact />
+      <main className="min-h-0 flex-1 pt-2 sm:pt-3">
         <ChatPanel initialDraft={initialDraft} />
       </main>
-    </>
+    </div>
   );
 }

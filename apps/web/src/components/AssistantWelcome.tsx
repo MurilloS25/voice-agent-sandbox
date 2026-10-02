@@ -8,6 +8,9 @@
 export const WELCOME_TEXT =
   "Hi! I’m Quillwheel’s workshop assistant. I can explain our services, check available times, and prepare a booking for your confirmation. How can I help?";
 
+/** What the voice says when it starts in a conversation that already has messages. */
+export const VOICE_READY_TEXT = "Voice mode is ready.";
+
 /** Each action only fills the message box. The visitor reviews it and presses Send. */
 export const QUICK_ACTIONS = [
   { label: "See available services", draft: "What services do you offer?" },
@@ -35,11 +38,11 @@ export function AssistantWelcome({
       <div className="flex min-w-0 gap-3">
         <span
           aria-hidden="true"
-          className="mt-1 flex h-9 w-9 shrink-0 items-center justify-center bg-bottle font-display text-xl leading-none font-extrabold text-celeste"
+          className="mt-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-bottle font-display text-xl leading-none font-extrabold text-celeste"
         >
           Q
         </span>
-        <div className="max-w-prose min-w-0 border-2 border-moss bg-celeste/40 p-3">
+        <div className="max-w-prose min-w-0 rounded-2xl rounded-tl-md bg-white p-3 text-left shadow-[0_2px_14px_-6px_rgb(15_59_54/0.35)]">
           <p className="text-sm font-bold">Assistant (AI)</p>
           <p className="mt-1 [overflow-wrap:anywhere]">{WELCOME_TEXT}</p>
         </div>
@@ -61,7 +64,7 @@ export function AssistantWelcome({
                   onClick={() => onPick(action.draft)}
                   disabled={disabled || boxHasText}
                   aria-describedby={boxHasText ? "quick-start-note" : undefined}
-                  className="min-h-12 border-2 border-bottle bg-hivis px-4 py-2 text-left font-bold [overflow-wrap:anywhere] hover:bg-celeste disabled:opacity-60"
+                  className="min-h-12 rounded-full border border-bottle/40 bg-white px-5 py-2 text-left font-bold [overflow-wrap:anywhere] hover:bg-celeste/40 disabled:opacity-60"
                 >
                   {action.label}
                 </button>

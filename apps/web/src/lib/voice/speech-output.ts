@@ -12,6 +12,19 @@
  * (never a proposal token, a hidden field, the timeline or a system notice).
  */
 
+import {
+  chooseVoice,
+  clampRate,
+  DEFAULT_SETTINGS,
+  parseSettings,
+  SETTINGS_KEY,
+  SPEECH_DEFAULTS,
+  voiceOptions,
+  type VoiceChoice,
+  type VoiceOption,
+  type VoiceSettings,
+} from "./voice-selection";
+
 /** Long utterances are cut off by some browsers (Chrome stops around 15 s), so replies are split. */
 export const MAX_CHUNK_CHARS = 180;
 
@@ -128,28 +141,7 @@ export function splitForSpeech(
   return chunks;
 }
 
-export type VoiceChoice =
-  | { kind: "none" } // no speechSynthesis, or no suitable voice
-  | { kind: "local"; voice: SpeechSynthesisVoice }
-  | { kind: "network"; voice: SpeechSynthesisVoice };
-
-function isEnglish(voice: SpeechSynthesisVoice): boolean {
-  return voice.lang.toLowerCase().replace("_", "-").split("-")[0] === "en";
-}
-
-/** A local English voice first, then a network English one, otherwise none. */
-export function chooseVoice(
-  voices: readonly SpeechSynthesisVoice[],
-): VoiceChoice {
-  const english = voices.filter(isEnglish);
-  const preferred = (list: SpeechSynthesisVoice[]) =>
-    list.find((voice) => voice.default) ?? list[0];
-  const local = preferred(english.filter((voice) => voice.localService));
-  if (local) return { kind: "local", voice: local };
-  const network = preferred(english.filter((voice) => !voice.localService));
-  if (network) return { kind: "network", voice: network };
-  return { kind: "none" };
-}
+export { chooseVoice, type VoiceChoice } from "./voice-selection";
 
 export type SpeechSnapshot = {
   /** Whether `speechSynthesis` exists at all. */
@@ -157,6 +149,12 @@ export type SpeechSnapshot = {
   choice: VoiceChoice;
   /** The reply being read out, if any. */
   speakingId: string | null;
+  /** The English voices the picker offers, local ones first. */
+  voices: readonly VoiceOption[];
+  /** The visitor's voice, speed and review choice: the only things ever stored. */
+  settings: VoiceSettings;
+  /** The selected voice is a network voice the visitor explicitly picked and agreed to use. */
+  networkConsented: boolean;
 };
 
 export type SpeakResult =
@@ -171,22 +169,49 @@ export type SpeechOutput = {
    * Reads `text` aloud, with numeric dates made speakable (the caller's text is not changed).
    * Replaces anything already being spoken. Never throws.
    */
-  speak(
-    id: string,
-    text: string,
-    options?: { allowNetwork?: boolean },
-  ): SpeakResult;
+  speak(id: string, text: string, options?: SpeakOptions): SpeakResult;
+  /** Picks a voice and/or speed. Stored, if storage is available, and applied to the next speech. */
+  setSettings(change: Partial<VoiceSettings>): void;
+  /** Back to the recommended voice and the defaults, and forgets what was stored. */
+  resetSettings(): void;
+  /**
+   * The visitor agreed to use the voice now selected, a network voice. When they picked that
+   * voice themselves the agreement is remembered in this browser (by exact name); for an
+   * automatic choice it is not, and the caller keeps it for the page only.
+   */
+  agreeToNetworkVoice(): void;
+  /** Forgets a remembered agreement. */
+  withdrawNetworkVoice(): void;
   /** Stops speaking at once. Safe to call at any time. */
   stop(): void;
   /** Stops speaking and detaches from the browser. */
   dispose(): void;
 };
 
+export type SpeakOptions = {
+  allowNetwork?: boolean;
+  /**
+   * Called once, when the browser reports that the first part of the reply actually began to
+   * play. "Started" is not "queued": a refused or failed start never calls it.
+   */
+  onStart?: () => void;
+  /**
+   * Called when the browser fails or refuses part of this reply (for example an autoplay block).
+   * Not called when the reply is stopped or replaced on purpose.
+   */
+  onError?: () => void;
+};
+
 export const UNSUPPORTED: SpeechSnapshot = {
   supported: false,
   choice: { kind: "none" },
   speakingId: null,
+  voices: [],
+  settings: DEFAULT_SETTINGS,
+  networkConsented: false,
 };
+
+type SettingsStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 
 type Synth = Pick<
   SpeechSynthesis,
@@ -194,26 +219,102 @@ type Synth = Pick<
 >;
 type UtteranceConstructor = new (text: string) => SpeechSynthesisUtterance;
 
+/** The browser's storage, if it lets us have it (it can throw or be absent). */
+export function browserStorage(): SettingsStorage | undefined {
+  try {
+    return typeof window !== "undefined" ? window.localStorage : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function readVoices(synth: Synth): SpeechSynthesisVoice[] {
+  try {
+    return [...synth.getVoices()];
+  } catch {
+    return []; // a failure to list voices means "no voice", never an error on the page
+  }
+}
+
 export function createSpeechOutput(
   synth: Synth | undefined,
   Utterance: UtteranceConstructor | undefined,
+  storage?: SettingsStorage,
 ): SpeechOutput {
   if (!synth || !Utterance) {
+    // Nothing can be spoken, but the visitor's other choices (for example whether to review a
+    // transcript before sending it) still work and are still remembered.
+    const quiet = new Set<() => void>();
+    let settings = DEFAULT_SETTINGS;
+    try {
+      settings = parseSettings(storage?.getItem(SETTINGS_KEY) ?? null);
+    } catch {
+      // storage refused: the defaults apply
+    }
+    let current: SpeechSnapshot = { ...UNSUPPORTED, settings };
+    const change = (next: VoiceSettings, persist: boolean) => {
+      try {
+        if (persist) storage?.setItem(SETTINGS_KEY, JSON.stringify(next));
+        else storage?.removeItem(SETTINGS_KEY);
+      } catch {
+        // not stored
+      }
+      current = { ...current, settings: next };
+      quiet.forEach((listener) => listener());
+    };
     return {
-      getSnapshot: () => UNSUPPORTED,
-      subscribe: () => () => undefined,
+      getSnapshot: () => current,
+      subscribe(listener) {
+        quiet.add(listener);
+        return () => quiet.delete(listener);
+      },
       speak: () => "unavailable",
+      setSettings: (patch) =>
+        change(
+          {
+            ...current.settings,
+            ...patch,
+            rate: clampRate((patch.rate ?? current.settings.rate) as number),
+            consentVoice: null,
+          },
+          true,
+        ),
+      resetSettings: () => change(DEFAULT_SETTINGS, false),
+      agreeToNetworkVoice: () => undefined,
+      withdrawNetworkVoice: () => undefined,
       stop: () => undefined,
-      dispose: () => undefined,
+      dispose: () => quiet.clear(),
     };
   }
 
   const listeners = new Set<() => void>();
   let generation = 0; // every speak or stop makes older callbacks stale
+  let stored = DEFAULT_SETTINGS;
+  try {
+    stored = parseSettings(storage?.getItem(SETTINGS_KEY) ?? null);
+  } catch {
+    // storage refused: the defaults apply
+  }
+  const describe = (
+    voices: SpeechSynthesisVoice[],
+    settings: VoiceSettings,
+  ) => {
+    const choice = chooseVoice(voices, settings.voiceName);
+    return {
+      choice,
+      voices: voiceOptions(voices),
+      settings,
+      networkConsented:
+        choice.kind === "network" &&
+        settings.consentVoice !== null &&
+        settings.consentVoice === choice.voice.name &&
+        settings.voiceName === choice.voice.name,
+    };
+  };
   let snapshot: SpeechSnapshot = {
     supported: true,
-    choice: chooseVoice(synth.getVoices()),
     speakingId: null,
+    ...describe(readVoices(synth), stored),
   };
 
   const update = (next: Partial<SpeechSnapshot>) => {
@@ -223,7 +324,17 @@ export function createSpeechOutput(
 
   // Voices load late in some browsers: the list is read again whenever it changes.
   const onVoicesChanged = () =>
-    update({ choice: chooseVoice(synth.getVoices()) });
+    update(describe(readVoices(synth), snapshot.settings));
+
+  const changeSettings = (settings: VoiceSettings, persist: boolean) => {
+    try {
+      if (persist) storage?.setItem(SETTINGS_KEY, JSON.stringify(settings));
+      else storage?.removeItem(SETTINGS_KEY);
+    } catch {
+      // not stored: the choice still applies to this page
+    }
+    update(describe(readVoices(synth), settings));
+  };
   synth.addEventListener("voiceschanged", onVoicesChanged);
 
   const stop = () => {
@@ -242,10 +353,45 @@ export function createSpeechOutput(
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
-    speak(id, text, { allowNetwork = false } = {}) {
+    setSettings(change) {
+      const next = { ...snapshot.settings, ...change };
+      changeSettings(
+        {
+          ...next,
+          rate: clampRate(next.rate),
+          // An agreement belongs to one voice: picking another one ends it.
+          consentVoice:
+            next.consentVoice !== null && next.consentVoice === next.voiceName
+              ? next.consentVoice
+              : null,
+        },
+        true,
+      );
+    },
+    resetSettings() {
+      changeSettings(DEFAULT_SETTINGS, false);
+    },
+    agreeToNetworkVoice() {
+      const { choice, settings } = snapshot;
+      if (choice.kind !== "network") return;
+      if (settings.voiceName === choice.voice.name) {
+        changeSettings({ ...settings, consentVoice: choice.voice.name }, true);
+      }
+    },
+    withdrawNetworkVoice() {
+      if (snapshot.settings.consentVoice === null) return;
+      changeSettings({ ...snapshot.settings, consentVoice: null }, true);
+    },
+    speak(id, text, { allowNetwork = false, onStart, onError } = {}) {
       const { choice } = snapshot;
       if (choice.kind === "none") return "unavailable";
-      if (choice.kind === "network" && !allowNetwork) return "needs_consent";
+      if (
+        choice.kind === "network" &&
+        !allowNetwork &&
+        !snapshot.networkConsented
+      ) {
+        return "needs_consent";
+      }
       // Dates are made speakable first, so a date is never cut up or read digit by digit.
       const chunks = splitForSpeech(prepareTextForSpeech(text));
       if (chunks.length === 0) return "unavailable";
@@ -259,16 +405,26 @@ export function createSpeechOutput(
         }
       };
       const fail = () => {
-        if (generation === mine) stop();
+        if (generation !== mine) return;
+        stop();
+        onError?.();
       };
       try {
         chunks.forEach((chunk, index) => {
           const utterance = new Utterance(chunk);
           utterance.voice = choice.voice;
-          utterance.lang = choice.voice.lang;
+          utterance.lang = choice.voice.lang || SPEECH_DEFAULTS.lang;
+          utterance.rate = snapshot.settings.rate;
+          utterance.pitch = SPEECH_DEFAULTS.pitch;
+          utterance.volume = SPEECH_DEFAULTS.volume;
           // An error on any chunk (a blocked start, for example by an autoplay policy, or a
           // failure part-way) silences the rest of the reply and ends quietly: Listen stays.
           utterance.onerror = fail;
+          if (index === 0 && onStart) {
+            utterance.onstart = () => {
+              if (generation === mine) onStart();
+            };
+          }
           if (index === chunks.length - 1) utterance.onend = finish;
           synth.speak(utterance);
         });

@@ -1,8 +1,9 @@
-import { render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { business, services } from "@/test/fixtures";
 import { expectNoA11yViolations } from "@/test/axe";
+import { installMedia, type FakeMedia } from "@/test/voice-fakes";
 
 import AssistantPage from "./page";
 
@@ -13,6 +14,9 @@ vi.mock("@/lib/api/client", () => ({ getBusinessOverview }));
 vi.mock("./actions", () => ({ sendTurn: vi.fn() }));
 vi.mock("@/app/book/actions", () => ({ confirmBooking: vi.fn() }));
 
+const toText = () =>
+  fireEvent.click(screen.getByRole("button", { name: "Text" }));
+
 async function renderPage(search: Record<string, string> = {}) {
   const props = {
     params: Promise.resolve({}),
@@ -21,7 +25,14 @@ async function renderPage(search: Record<string, string> = {}) {
   return render(await AssistantPage(props));
 }
 
+let media: FakeMedia;
+
+afterEach(() => {
+  media.uninstall();
+});
+
 beforeEach(() => {
+  media = installMedia(); // a browser that can record: Voice is what the visitor meets first
   getBusinessOverview.mockReset();
   getBusinessOverview.mockResolvedValue({
     kind: "ok",
@@ -45,6 +56,15 @@ describe("/assistant", () => {
     expect(
       screen.getByRole("link", { name: "Back to workshop" }),
     ).toHaveAttribute("href", "/");
+    // Voice is the first thing the visitor meets; Text is one press away.
+    expect(
+      screen.getByRole("button", { name: "Start voice assistant" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Voice" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    toText();
     expect(screen.getByLabelText("Your message")).toBeInTheDocument();
     expect(screen.queryByText(/form instead/i)).not.toBeInTheDocument();
     expect(document.body.innerHTML).not.toContain("/#availability");
@@ -59,6 +79,11 @@ describe("/assistant", () => {
 
   it("turns a service and a date into an editable draft and sends nothing", async () => {
     await renderPage({ service: "flat-repair", date: "2026-10-01" });
+    // In Voice the prepared question waits, unsent, with a way to review it in Text.
+    expect(
+      screen.getByText(/A message is waiting in Text/),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Review it in Text" }));
     expect(screen.getByLabelText("Your message")).toHaveValue(
       "Do you have time for Flat repair on Thursday, October 1, 2026?",
     );
@@ -73,12 +98,15 @@ describe("/assistant", () => {
       date: "2026-02-30",
       start: "2026-10-01T13:00:00Z",
     });
+    expect(screen.queryByText(/A message is waiting in Text/)).toBeNull();
+    toText();
     expect(screen.getByLabelText("Your message")).toHaveValue("");
   });
 
   it("keeps working, without a draft for the service, when the schedule service is down", async () => {
     getBusinessOverview.mockResolvedValue({ kind: "unavailable" });
     await renderPage({ service: "flat-repair" });
+    toText();
     expect(screen.getByLabelText("Your message")).toHaveValue("");
   });
 

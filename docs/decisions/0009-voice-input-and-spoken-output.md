@@ -2,6 +2,7 @@
 
 - Status: accepted. Implemented and verified offline (plan 0004, phases 4A to 4E), then checked once against the real Groq services with synthetic audio (checkpoints C2 and C3, 2026-10-01; sanitized results in the plan's closeout). Still **unverified**: a real microphone (the browser run used a fake capture device fed by a synthetic clip), real speech synthesis voices (a local stand-in was injected), other browsers and devices, and Zero Data Retention itself, which the operator confirmed and the repository cannot verify.
 - Date: 2026-10-01
+- Update (2026-10-02): the assistant UI that presents voice, the Speak/Stop control, the "Read replies aloud" switch and the voice ranking were reworked in [ADR 0010](0010-voice-first-assistant-experience.md); the transport, limits and privacy decisions here are unchanged.
 
 ## Context
 
