@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
+  type ReactNode,
   type Ref,
 } from "react";
 
@@ -101,9 +102,28 @@ const ERROR_COPY: Record<ErrorCode, { title: string; body: string }> = {
 };
 
 const buttonClass =
-  "min-h-12 bg-bottle px-6 py-2 text-lg font-bold [overflow-wrap:anywhere] text-primer hover:bg-moss disabled:opacity-60";
+  "inline-flex min-h-12 items-center gap-2 bg-bottle px-5 py-2 text-lg font-bold [overflow-wrap:anywhere] text-primer hover:bg-moss disabled:opacity-60";
 const secondaryClass =
-  "min-h-12 border-2 border-bottle px-4 py-2 font-bold [overflow-wrap:anywhere] hover:bg-hivis disabled:opacity-60";
+  "inline-flex min-h-12 items-center gap-2 border-2 border-bottle bg-white px-4 py-2 font-bold [overflow-wrap:anywhere] hover:bg-hivis disabled:opacity-60";
+
+function MicIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      focusable="false"
+      viewBox="0 0 24 24"
+      className="h-5 w-5 shrink-0"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="9" y="2" width="6" height="12" rx="3" />
+      <path d="M5 11a7 7 0 0 0 14 0M12 18v4" />
+    </svg>
+  );
+}
 
 function clock(ms: number): string {
   const seconds = Math.floor(Math.min(ms, MAX_RECORDING_MS) / 1000);
@@ -120,6 +140,10 @@ type VoiceInputProps = {
   onTranscript: (text: string) => void;
   /** Called when a new recording is requested (for example to stop spoken output). */
   onRecordingStart?: () => void;
+  /** True while a transcript is in the box waiting for the visitor to check and send it. */
+  onReviewChange?: (reviewing: boolean) => void;
+  /** The page's own send button, placed at the end of the controls row. */
+  actions?: ReactNode;
   disabled?: boolean;
   controlRef?: Ref<VoiceControl>;
 };
@@ -127,6 +151,8 @@ type VoiceInputProps = {
 export function VoiceInput({
   onTranscript,
   onRecordingStart,
+  onReviewChange,
+  actions,
   disabled = false,
   controlRef,
 }: VoiceInputProps) {
@@ -189,6 +215,16 @@ export function VoiceInput({
     );
     return () => clearInterval(timer);
   }, [state.kind]);
+
+  // The composer relabels its send button while a transcript waits to be checked.
+  const reviewing = state.kind === "review";
+  const latestReview = useRef(onReviewChange);
+  useEffect(() => {
+    latestReview.current = onReviewChange;
+  });
+  useEffect(() => {
+    latestReview.current?.(reviewing);
+  }, [reviewing]);
 
   // A problem takes focus so a screen reader hears it.
   useEffect(() => {
@@ -299,7 +335,7 @@ export function VoiceInput({
           ? "Recording stopped after 15 seconds. Transcribing it."
           : "Transcribing your recording.";
       case "review":
-        return "The transcript is in your message. Check it, change it if you like, then press Send message.";
+        return "The transcript is in your message. Check it, change it if you like, then press Send transcript.";
       default:
         return "";
     }
@@ -307,26 +343,19 @@ export function VoiceInput({
 
   if (!supported || state.kind === "unsupported") {
     return (
-      <p className="mt-3 max-w-prose text-sm">
-        Voice input isn&apos;t available in this browser. You can type your
-        message.
-      </p>
+      <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+        <p className="min-w-0 flex-1 basis-56 text-sm">
+          Voice input isn&apos;t available in this browser. You can type your
+          message.
+        </p>
+        {actions}
+      </div>
     );
   }
 
   return (
-    <div
-      role="group"
-      aria-label="Voice input"
-      className="mt-4 max-w-2xl space-y-3"
-    >
-      <p id="voice-help" className="text-sm">
-        Speak sends one short recording (up to 15 seconds) to a transcription
-        service to turn it into text. This app doesn&apos;t store it, and the
-        text appears in your message for you to check before you send it.
-      </p>
-
-      <div className="flex flex-wrap items-center gap-4">
+    <div role="group" aria-label="Voice input" className="mt-3 space-y-2">
+      <div className="flex flex-wrap items-center gap-3">
         {recording ? (
           <button type="button" onClick={stop} className={buttonClass}>
             Stop
@@ -339,6 +368,17 @@ export function VoiceInput({
           <button type="button" onClick={cancel} className={buttonClass}>
             Cancel transcription
           </button>
+        ) : state.kind === "review" ? (
+          <button
+            type="button"
+            onClick={() => void start()}
+            disabled={disabled}
+            aria-describedby="voice-help"
+            className={secondaryClass}
+          >
+            <MicIcon />
+            Record again
+          </button>
         ) : (
           <button
             type="button"
@@ -347,6 +387,7 @@ export function VoiceInput({
             aria-describedby="voice-help"
             className={buttonClass}
           >
+            <MicIcon />
             Speak
           </button>
         )}
@@ -368,16 +409,19 @@ export function VoiceInput({
         ) : null}
 
         {recording ? (
-          <p className="flex items-center gap-2 font-bold">
+          <p className="flex items-center gap-2 border-2 border-rust bg-white px-3 py-1 font-bold">
             <span
               aria-hidden="true"
               className="inline-block h-3 w-3 rounded-full bg-rust motion-safe:animate-pulse"
             />
+            <span>Recording</span>
             <span role="timer" aria-live="off">
               {clock(elapsedMs)} of {clock(MAX_RECORDING_MS)}
             </span>
           </p>
         ) : null}
+
+        {actions ? <div className="ml-auto">{actions}</div> : null}
       </div>
 
       {state.kind === "denied" ? (
@@ -407,10 +451,16 @@ export function VoiceInput({
         </div>
       ) : null}
 
+      <p id="voice-help" className="text-sm">
+        Speak sends a recording of up to 15 seconds to a transcription service
+        to turn it into text. This app doesn&apos;t store it, and you check the
+        text before you send it.
+      </p>
+
       <p
         role="status"
         aria-live="polite"
-        className={status ? "text-sm" : "sr-only"}
+        className={status ? "text-sm font-bold" : "sr-only"}
       >
         {status}
       </p>

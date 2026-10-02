@@ -37,21 +37,22 @@ export function SpokenReplies({
   return (
     <section
       aria-labelledby="spoken-heading"
-      className="mt-6 max-w-2xl space-y-3 border-l-4 border-moss pl-4"
+      className="space-y-2 border-b-2 border-bottle/30 bg-white/60 px-4 py-3 sm:px-6"
     >
-      <h3 id="spoken-heading" className="font-bold">
-        Synthesized voice
-      </h3>
-
-      <label className="flex min-h-12 items-start gap-3">
-        <input
-          type="checkbox"
-          checked={readAloud}
-          onChange={(event) => onReadAloud(event.target.checked)}
-          className="mt-1.5 h-5 w-5 shrink-0"
-        />
-        <span className="[overflow-wrap:anywhere]">Read replies aloud</span>
-      </label>
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-1">
+        <h3 id="spoken-heading" className="font-bold">
+          Synthesized voice
+        </h3>
+        <label className="flex min-h-12 items-center gap-3">
+          <input
+            type="checkbox"
+            checked={readAloud}
+            onChange={(event) => onReadAloud(event.target.checked)}
+            className="h-5 w-5 shrink-0 accent-bottle"
+          />
+          <span className="[overflow-wrap:anywhere]">Read replies aloud</span>
+        </label>
+      </div>
       <p className="text-sm">
         Off by default. When it is on, your browser reads each assistant reply
         aloud after you send a message. You can also press Listen on any reply.

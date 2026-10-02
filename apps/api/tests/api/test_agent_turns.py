@@ -174,7 +174,11 @@ def test_without_a_provider_the_route_is_503_and_creates_nothing() -> None:
     )
     assert response.status_code == 503
     assert error_code(response) == "agent_unavailable"
-    # The existing form-based flow is unaffected.
+    # Neutral wording: no alternative booking path is suggested.
+    assert response.json()["error"]["message"] == (
+        "The workshop assistant is temporarily unavailable. Please try again shortly."
+    )
+    # Read-only endpoints are unaffected.
     assert client.get("/v1/services").status_code == 200
 
 

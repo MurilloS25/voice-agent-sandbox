@@ -85,8 +85,8 @@ async function stopRecording(afterMs = 1000) {
   await press("Stop");
 }
 
-async function startRecording() {
-  await press("Speak");
+async function startRecording(name: string = "Speak") {
+  await press(name);
   return screen.findByRole("button", { name: "Stop" });
 }
 
@@ -152,10 +152,26 @@ describe("a recording", () => {
     );
     expect(onTranscript).toHaveBeenCalledTimes(1);
     expect(screen.getByRole("status")).toHaveTextContent(
-      /Check it, change it if you like, then press Send message/,
+      /Check it, change it if you like, then press Send transcript/,
     );
-    expect(speak()).toBeEnabled();
+    // The transcript is waiting to be checked: Record again replaces Speak.
+    expect(screen.queryByRole("button", { name: "Speak" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Record again" })).toBeEnabled();
     expect(media.streams.every((stream) => stream.allStopped)).toBe(true);
+  });
+
+  it("tells the page while a transcript waits to be checked, and stops when it is cancelled", async () => {
+    serve();
+    const onReviewChange = vi.fn();
+    const control = createRef<VoiceControl>();
+    mount({ onReviewChange, controlRef: control });
+    await startRecording();
+    await stopRecording();
+    await screen.findByText(/transcript is in your message/i);
+    expect(onReviewChange).toHaveBeenLastCalledWith(true);
+    act(() => control.current?.cancel());
+    expect(onReviewChange).toHaveBeenLastCalledWith(false);
+    expect(speak()).toBeEnabled();
   });
 
   it("asks whether voice is on before it asks for the microphone", async () => {
@@ -175,7 +191,7 @@ describe("a recording", () => {
     await startRecording();
     await stopRecording();
     await screen.findByText(/transcript is in your message/i);
-    await startRecording();
+    await startRecording("Record again");
     expect(
       fetchMock.mock.calls.filter((c) => String(c[0]).includes("probe=1")),
     ).toHaveLength(1);

@@ -10,7 +10,7 @@ const { confirmBooking } = vi.hoisted(() => ({ confirmBooking: vi.fn() }));
 vi.mock("./actions", () => ({ confirmBooking }));
 
 const TOKEN = "v1.payload.signature";
-const REVIEW = "/book?service=flat-repair&start=2026-10-01T13%3A00%3A00Z";
+const REVIEW = "/assistant?service=flat-repair&date=2026-10-01";
 const OPEN_TIMES = "/?service=flat-repair&date=2026-10-01#availability";
 
 function setup() {

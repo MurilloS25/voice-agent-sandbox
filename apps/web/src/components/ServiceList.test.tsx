@@ -56,3 +56,17 @@ describe("ServiceList", () => {
     expect(screen.getByText("$85.00")).toBeInTheDocument();
   });
 });
+
+describe("ServiceList: asking the assistant", () => {
+  it("sends each service to the assistant with only its id", () => {
+    render(<ServiceList services={services} />);
+    const links = screen.getAllByRole("link");
+    expect(links.map((link) => link.getAttribute("href"))).toEqual([
+      "/assistant?service=flat-repair",
+      "/assistant?service=standard-tune-up",
+    ]);
+    expect(links[0]).toHaveAccessibleName(
+      "Ask the assistant about this: Flat repair",
+    );
+  });
+});

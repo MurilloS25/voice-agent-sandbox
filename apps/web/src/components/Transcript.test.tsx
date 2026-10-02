@@ -139,10 +139,7 @@ describe("Transcript", () => {
     ).toHaveLength(1);
     expect(
       screen.getByRole("link", { name: "Review this time again" }),
-    ).toHaveAttribute(
-      "href",
-      expect.stringContaining("/book?service=flat-repair"),
-    );
+    ).toHaveAttribute("href", "/assistant?service=flat-repair&date=2026-10-01");
 
     rerender(
       <Transcript
@@ -155,6 +152,25 @@ describe("Transcript", () => {
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
     expect(container.querySelector('input[name="proposal_token"]')).toBeNull();
     expect(container.innerHTML).not.toContain(TOKEN);
+  });
+
+  it("labels each booking review by its reply so landmarks stay unique", () => {
+    render(
+      <Transcript
+        idPrefix="t"
+        turns={[
+          { message: "a", response: reviewTurn(1) },
+          { message: "b", response: reviewTurn(2) },
+        ]}
+        liveReviewTurn={2}
+      />,
+    );
+    expect(
+      screen.getByRole("region", { name: "Booking review for reply 1" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("region", { name: "Booking review for reply 2" }),
+    ).toBeInTheDocument();
   });
 
   it("moves focus to the response of the turn it is told to", () => {

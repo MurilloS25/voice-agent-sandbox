@@ -1,12 +1,11 @@
 import Link from "next/link";
 
 import type { Business } from "@/lib/api/client";
+import { assistantHref } from "@/lib/assistant-link";
 
 import { Wheel } from "./Wheel";
 
 export function BusinessHeader({ business }: { business: Business }) {
-  const telephone = business.phone.replace(/[^\d+]/g, "");
-
   return (
     <header className="relative overflow-hidden bg-celeste text-bottle">
       {/*
@@ -21,27 +20,19 @@ export function BusinessHeader({ business }: { business: Business }) {
         <p className="mt-5 max-w-md text-xl font-bold">{business.tagline}</p>
         <address className="mt-6 text-lg not-italic">
           <p>{business.address}</p>
-          <p>
-            <a
-              href={`tel:${telephone}`}
-              className="underline underline-offset-4"
-            >
-              {business.phone}
-            </a>
-          </p>
         </address>
         <p className="mt-8">
           <Link
-            href="/assistant"
+            href={assistantHref()}
             className="inline-block min-h-12 bg-bottle px-6 py-3 text-lg font-bold text-primer hover:bg-moss"
           >
             Ask the assistant
           </Link>
         </p>
         <p className="mt-8 max-w-md text-base">
-          This is a fictional business built for a software demo. You can pick
-          an open time below and review a booking, but nothing here is real and
-          no personal details are collected.
+          This is a fictional business built for a software demo. The assistant
+          can check open times and prepare a booking for you to confirm, but
+          nothing here is real and no personal details are collected.
         </p>
       </div>
     </header>
