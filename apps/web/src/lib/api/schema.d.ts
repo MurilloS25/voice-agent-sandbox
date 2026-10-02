@@ -11,8 +11,52 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Health */
+    /**
+     * Health
+     * @description The process is up. It touches nothing: no database, no provider.
+     */
     get: operations["health_health_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/health/live": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Health
+     * @description The process is up. It touches nothing: no database, no provider.
+     */
+    get: operations["health_health_live_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/health/ready": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Health Ready
+     * @description Ready to serve: not shutting down and, with PostgreSQL, the database answers a minimal
+     *     query. A status word only; never a host, a role, a version or a setting.
+     */
+    get: operations["health_ready_health_ready_get"];
     put?: never;
     post?: never;
     delete?: never;
@@ -609,6 +653,17 @@ export interface components {
        */
       seq: number;
     };
+    /**
+     * ReadinessResponse
+     * @description Only a status word: no host, version, role or configuration.
+     */
+    ReadinessResponse: {
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: "ready" | "draining" | "unavailable";
+    };
     /** ServiceResponse */
     ServiceResponse: {
       /** Description */
@@ -838,6 +893,55 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["HealthResponse"];
+        };
+      };
+    };
+  };
+  health_health_live_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HealthResponse"];
+        };
+      };
+    };
+  };
+  health_ready_health_ready_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ReadinessResponse"];
+        };
+      };
+      /** @description Not ready, or draining. */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ReadinessResponse"];
         };
       };
     };
@@ -1213,7 +1317,7 @@ export interface operations {
       path?: never;
       cookie?: never;
     };
-    /** @description The raw audio bytes of one short recording (at most 512 KB). */
+    /** @description The raw audio bytes of one short recording (at most 256 KB). */
     requestBody: {
       content: {
         "audio/mp4": string;
@@ -1232,7 +1336,7 @@ export interface operations {
           "application/json": components["schemas"]["TranscriptionResponse"];
         };
       };
-      /** @description audio_too_large: more than 512 KB. */
+      /** @description audio_too_large: more than 256 KB. */
       413: {
         headers: {
           [name: string]: unknown;

@@ -11,7 +11,8 @@ from datetime import date
 from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import APIRouter, Query, Response
+from fastapi import APIRouter, Query, Request, Response
+from fastapi.responses import JSONResponse
 from pydantic import BeforeValidator
 
 from voice_agent_api.agent.contracts import AgentTurnRequest, AgentTurnResponse
@@ -38,6 +39,7 @@ from voice_agent_api.api.schemas import (
     HealthResponse,
     MoneyResponse,
     OpeningIntervalResponse,
+    ReadinessResponse,
     ServicesResponse,
     SlotResponse,
 )
@@ -48,6 +50,7 @@ from voice_agent_api.domain.models import Appointment
 from voice_agent_api.domain.queries import query_availability
 
 router = APIRouter()
+_NO_STORE = {"Cache-Control": "no-store"}
 logger = logging.getLogger("voice_agent_api")
 
 _DATE_ONLY = re.compile(r"\d{4}-\d{2}-\d{2}")
@@ -130,8 +133,28 @@ def _appointment_response(appointment: Appointment) -> AppointmentResponse:
 
 
 @router.get("/health", response_model=HealthResponse, tags=["system"])
+@router.get("/health/live", response_model=HealthResponse, tags=["system"])
 def health() -> HealthResponse:
+    """The process is up. It touches nothing: no database, no provider."""
     return HealthResponse(status="ok")
+
+
+@router.get(
+    "/health/ready",
+    response_model=ReadinessResponse,
+    tags=["system"],
+    responses={503: {"model": ReadinessResponse, "description": "Not ready, or draining."}},
+)
+def health_ready(request: Request) -> Response:
+    """Ready to serve: not shutting down and, with PostgreSQL, the database answers a minimal
+    query. A status word only; never a host, a role, a version or a setting."""
+    state = request.app.state
+    if getattr(state, "draining", False):
+        return JSONResponse({"status": "draining"}, status_code=503, headers=_NO_STORE)
+    check = getattr(state, "ready_check", None)
+    if check is not None and not check():
+        return JSONResponse({"status": "unavailable"}, status_code=503, headers=_NO_STORE)
+    return JSONResponse({"status": "ready"}, headers=_NO_STORE)
 
 
 @router.get(

@@ -98,6 +98,9 @@ class AgentService:
 
     def close(self) -> None:
         self._caller.close()
+        clear = getattr(self._store, "clear", None)
+        if callable(clear):
+            clear()  # nothing a visitor said outlives the process
 
     def handle_turn(self, request: AgentTurnRequest) -> AgentTurnResponse:
         decision = self._store.begin_turn(request)

@@ -148,7 +148,16 @@ async def _unhandled(request: Request, exc: Exception) -> JSONResponse:
     # Log the traceback server-side; the client only ever sees a generic message. The route
     # template is logged, never the concrete path, which can carry an appointment id.
     route = getattr(request.scope.get("route"), "path", "-")
-    logger.error("Unhandled error on %s %s", request.method, route, exc_info=exc)
+    # Class name only: an exception's text can carry a driver's key values or a provider's
+    # payload. A traceback is logged only when explicitly enabled (development and tests).
+    verbose = bool(getattr(request.app.state, "log_tracebacks", False))
+    logger.error(
+        "Unhandled error on %s %s error=%s",
+        request.method,
+        route,
+        type(exc).__name__,
+        exc_info=exc if verbose else None,
+    )
     return _envelope(500, ErrorBody(code="internal_error", message="Something went wrong."))
 
 

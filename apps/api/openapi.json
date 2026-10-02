@@ -810,6 +810,25 @@
         "title": "ProviderErrorEvent",
         "type": "object"
       },
+      "ReadinessResponse": {
+        "description": "Only a status word: no host, version, role or configuration.",
+        "properties": {
+          "status": {
+            "enum": [
+              "ready",
+              "draining",
+              "unavailable"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "ReadinessResponse",
+        "type": "object"
+      },
       "ServiceResponse": {
         "properties": {
           "description": {
@@ -1220,6 +1239,7 @@
   "paths": {
     "/health": {
       "get": {
+        "description": "The process is up. It touches nothing: no database, no provider.",
         "operationId": "health_health_get",
         "responses": {
           "200": {
@@ -1234,6 +1254,60 @@
           }
         },
         "summary": "Health",
+        "tags": [
+          "system"
+        ]
+      }
+    },
+    "/health/live": {
+      "get": {
+        "description": "The process is up. It touches nothing: no database, no provider.",
+        "operationId": "health_health_live_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health",
+        "tags": [
+          "system"
+        ]
+      }
+    },
+    "/health/ready": {
+      "get": {
+        "description": "Ready to serve: not shutting down and, with PostgreSQL, the database answers a minimal\nquery. A status word only; never a host, a role, a version or a setting.",
+        "operationId": "health_ready_health_ready_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadinessResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadinessResponse"
+                }
+              }
+            },
+            "description": "Not ready, or draining."
+          }
+        },
+        "summary": "Health Ready",
         "tags": [
           "system"
         ]
@@ -1743,7 +1817,7 @@
               }
             }
           },
-          "description": "The raw audio bytes of one short recording (at most 512 KB).",
+          "description": "The raw audio bytes of one short recording (at most 256 KB).",
           "required": true
         },
         "responses": {
@@ -1765,7 +1839,7 @@
                 }
               }
             },
-            "description": "audio_too_large: more than 512 KB."
+            "description": "audio_too_large: more than 256 KB."
           },
           "415": {
             "content": {

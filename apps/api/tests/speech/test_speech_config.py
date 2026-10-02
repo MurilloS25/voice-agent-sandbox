@@ -37,6 +37,9 @@ def clean_environment(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     yield
 
 
+from tests.conftest import TEST_API_SECRET  # noqa: E402
+
+
 def make(**overrides: Any) -> Settings:
     return Settings(_env_file=None, **overrides)
 
@@ -46,6 +49,7 @@ def groq(**overrides: Any) -> Settings:
         "speech_provider": "groq",
         "groq_api_key": SecretStr(KEY),
         "speech_model": "some/whisper-model",
+        "app_env": "test",  # production also needs PostgreSQL for the budget (plan 0007)
     }
     values.update(overrides)
     return make(**values)
@@ -189,6 +193,7 @@ def test_the_app_built_from_settings_serves_the_fake_and_closes_it() -> None:
     service = app.state.speech
     assert isinstance(service, SpeechService)
     data, headers = audio("audio/wav")
+    headers = {**headers, "authorization": f"Bearer {TEST_API_SECRET}"}
     try:
         response = request(app, data, headers)
     finally:
@@ -212,6 +217,7 @@ def test_the_app_built_from_default_settings_has_no_speech_and_answers_503() -> 
     app = create_app_from_settings(make())
     assert app.state.speech is None
     data, headers = audio("audio/wav")
+    headers = {**headers, "authorization": f"Bearer {TEST_API_SECRET}"}
     response = request(app, data, headers)
     assert response.status_code == 503
     assert response.json()["error"]["code"] == "speech_unavailable"

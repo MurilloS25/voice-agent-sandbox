@@ -19,7 +19,7 @@ MAX_DECLARED_DURATION_MS = 60_000
 
 @dataclass(frozen=True)
 class SpeechLimits:
-    max_audio_bytes: int = 512 * 1024
+    max_audio_bytes: int = 256 * 1024
     read_timeout_s: float = 3.0  # the whole request body
     provider_timeout_s: float = 6.0  # the wait for the transcription call
     max_concurrent: int = 2  # transcriptions in flight, abandoned ones included

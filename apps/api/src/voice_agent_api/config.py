@@ -25,6 +25,7 @@ ENV_FILE_VARIABLE = "VOICE_AGENT_ENV_FILE"
 DEFAULT_ENV_FILE = ".env"
 _PLACEHOLDER = "CHANGE_ME"
 MIN_SIGNING_KEY_BYTES = 32
+MIN_SECRET_CHARS = 32
 _MIN_DISTINCT_BYTES = 16
 
 
@@ -93,8 +94,51 @@ class Settings(BaseSettings):
     # most 6 s keeps a request inside the 14 s the web client allows (tests/speech/test_budget.py).
     speech_timeout_s: float = Field(6.0, gt=0, le=6.0)
     speech_read_timeout_s: float = Field(3.0, gt=0, le=3.0)
-    speech_max_audio_bytes: int = Field(524_288, ge=1024, le=524_288)
+    # 256 KB: 15 s of the browsers' own encodings (Opus or AAC at up to about 136 kbps) with
+    # headroom. The upper bound stays at the original 512 KB; the web app's check is pinned to
+    # the default by `tests/test_timeout_budget.py` and `apps/web/src/lib/voice/limits.test.ts`.
+    speech_max_audio_bytes: int = Field(262_144, ge=1024, le=524_288)
     speech_max_concurrent: int = Field(2, ge=1, le=4)
+
+    # --- Trust boundary (plan 0007) -----------------------------------------------------------
+    # The web tier authenticates to the API with a shared secret. `required` is the default and
+    # the only mode accepted in production; `disabled` exists for local development and tests.
+    api_auth_mode: Literal["required", "disabled"] = "required"
+    api_shared_secret: SecretStr | None = None
+    # Anything else (a JSON body above this many bytes) is refused before it is parsed.
+    json_body_limit_bytes: int = Field(16_384, ge=1024, le=65_536)
+    # Tracebacks in logs can carry exception text: only for development and tests.
+    log_tracebacks: bool = False
+
+    # Rate limits, requests per minute. Each limit has a per-visitor and an overall value; a
+    # bucket holds half a minute's worth. Defaults come from the Groq Free-plan limits (plan
+    # 0007): agent turns from 0.7 x 8,000 TPM / about 1,800 tokens per turn = 3 a minute overall;
+    # transcriptions from 6 a minute (20 RPM and 7,200 audio seconds an hour allow far more; the
+    # budget below is the real brake); the rest are generous for a human.
+    rate_limit_enabled: bool = True
+    rate_agent_client_per_min: int = Field(6, ge=1, le=600)
+    rate_agent_overall_per_min: int = Field(3, ge=1, le=600)
+    rate_speech_client_per_min: int = Field(6, ge=1, le=600)
+    rate_speech_overall_per_min: int = Field(6, ge=1, le=600)
+    rate_write_client_per_min: int = Field(6, ge=1, le=600)
+    rate_write_overall_per_min: int = Field(12, ge=1, le=600)
+    rate_read_client_per_min: int = Field(60, ge=1, le=600)
+    rate_read_overall_per_min: int = Field(300, ge=1, le=6000)
+    rate_max_clients: int = Field(5000, ge=100, le=100_000)
+    agent_max_in_flight: int = Field(4, ge=1, le=8)
+
+    # Daily provider budget (UTC day). Defaults are half of the Groq Free-plan daily limits
+    # (200,000 tokens; 28,800 audio seconds), so a counting error or a restart still leaves
+    # margin. A turn reserves `agent_turn_token_reserve` before the model is called and the
+    # difference to the real usage is settled afterwards. Audio is charged at the larger of
+    # the 10 s minimum Groq bills and the clip's worst-case length: its size divided by
+    # `speech_min_bytes_per_second` (the server cannot measure a recording's real length).
+    budget_enforced: bool = True
+    agent_daily_token_budget: int = Field(100_000, ge=1000, le=10_000_000)
+    agent_turn_token_reserve: int = Field(4000, ge=500, le=50_000)
+    speech_daily_audio_seconds: int = Field(14_400, ge=10, le=1_000_000)
+    speech_min_billed_seconds: int = Field(10, ge=1, le=60)
+    speech_min_bytes_per_second: int = Field(3000, ge=500, le=64_000)
 
 
 def decode_signing_key(value: str) -> bytes:
@@ -175,6 +219,58 @@ def failed_speech_settings(settings: Settings) -> list[str]:
     return failed
 
 
+# What production accepts. A deployment may lower a limit, never raise it past these.
+_PRODUCTION_CEILINGS = {
+    "RATE_AGENT_CLIENT_PER_MIN": ("rate_agent_client_per_min", 20),
+    "RATE_AGENT_OVERALL_PER_MIN": ("rate_agent_overall_per_min", 20),
+    "RATE_SPEECH_CLIENT_PER_MIN": ("rate_speech_client_per_min", 20),
+    "RATE_SPEECH_OVERALL_PER_MIN": ("rate_speech_overall_per_min", 20),
+    "RATE_WRITE_CLIENT_PER_MIN": ("rate_write_client_per_min", 30),
+    "RATE_WRITE_OVERALL_PER_MIN": ("rate_write_overall_per_min", 60),
+    "RATE_READ_CLIENT_PER_MIN": ("rate_read_client_per_min", 120),
+    "RATE_READ_OVERALL_PER_MIN": ("rate_read_overall_per_min", 600),
+}
+
+
+def _usable_api_secret(settings: Settings) -> bool:
+    secret = settings.api_shared_secret
+    if not _usable_secret(secret) or secret is None:
+        return False
+    value = secret.get_secret_value()
+    if len(value) < MIN_SECRET_CHARS or re.search(r"\s", value):
+        return False
+    key = settings.proposal_signing_key
+    # One secret per purpose: reusing the signing key would let either leak undo the other.
+    return key is None or key.get_secret_value() != value
+
+
+def failed_security_settings(settings: Settings) -> list[str]:
+    """Names of unsafe trust-boundary settings. Production never runs without authentication,
+    without rate limits, without budgets, or with limits above the ceilings."""
+    failed: list[str] = []
+    production = settings.app_env == "production"
+    if settings.api_auth_mode == "disabled":
+        if production:
+            failed.append("API_AUTH_MODE")
+    elif not _usable_api_secret(settings):
+        failed.append("API_SHARED_SECRET")
+    if production:
+        if not settings.rate_limit_enabled:
+            failed.append("RATE_LIMIT_ENABLED")
+        for name, (field, ceiling) in _PRODUCTION_CEILINGS.items():
+            if getattr(settings, field) > ceiling:
+                failed.append(name)
+        if not settings.budget_enforced:
+            failed.append("BUDGET_ENFORCED")
+        providers = settings.agent_provider != "disabled" or settings.speech_provider != "disabled"
+        # The budget lives in PostgreSQL: with a provider on, it must be checkable.
+        if providers and settings.appointment_store != "postgres":
+            failed.append("APPOINTMENT_STORE")
+        if settings.log_tracebacks:
+            failed.append("LOG_TRACEBACKS")
+    return failed
+
+
 def failed_settings(settings: Settings) -> list[str]:
     failed: list[str] = []
     key = _configured_key(settings)
@@ -187,6 +283,7 @@ def failed_settings(settings: Settings) -> list[str]:
         except ValueError:
             failed.append("PROPOSAL_SIGNING_KEY")
 
+    failed.extend(n for n in failed_security_settings(settings) if n not in failed)
     failed.extend(failed_agent_settings(settings))
     failed.extend(n for n in failed_speech_settings(settings) if n not in failed)
 

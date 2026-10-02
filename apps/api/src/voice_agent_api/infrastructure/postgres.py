@@ -209,6 +209,16 @@ class PostgresDatabase:
     def close(self) -> None:
         self._pool.close(timeout=_CLOSE_TIMEOUT_S)
 
+    def ping(self) -> bool:
+        """True when the database answers a minimal query. Never raises, never says why not."""
+        try:
+            with self.transaction() as cur:
+                cur.execute(_SQL_PING)
+                cur.fetchone()
+        except (StorageUnavailable, pg_errors.Error):
+            return False
+        return True
+
     @contextmanager
     def transaction(self) -> Iterator[Cursor]:
         """One transaction: commits on success, rolls back on any exception.

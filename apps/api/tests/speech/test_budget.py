@@ -24,7 +24,7 @@ def test_the_web_budget_is_the_server_bound_plus_the_shared_margin() -> None:
 
 def test_the_defaults_match_the_plan() -> None:
     limits = SpeechLimits()
-    assert limits.max_audio_bytes == 512 * 1024
+    assert limits.max_audio_bytes == 256 * 1024
     assert limits.max_concurrent == 2
     assert MAX_DECLARED_DURATION_MS == 60_000
     assert limits.provider_timeout_s < limits.server_bound_s  # time is left for the read
