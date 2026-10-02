@@ -37,21 +37,39 @@ function isSameOrigin(request: Request): boolean {
   }
 }
 
-/** The body, read incrementally and never beyond the limit. `undefined` when it is too big. */
-async function readBounded(request: Request): Promise<Uint8Array | undefined> {
+/** The whole body must arrive within this time, like the API's own read deadline. */
+export const READ_TIMEOUT_MS = 3000;
+
+/**
+ * The body, read incrementally, never beyond the size limit and within the read deadline.
+ * `"too_large"` and `"timeout"` say why nothing is returned.
+ */
+async function readBounded(
+  request: Request,
+): Promise<Uint8Array | "too_large" | "timeout"> {
   const reader = request.body?.getReader();
   if (!reader) return new Uint8Array(0);
   const chunks: Uint8Array[] = [];
   let total = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    if (total + value.byteLength > MAX_AUDIO_BYTES) {
-      await reader.cancel(); // stop reading; nothing over the limit was kept
-      return undefined;
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    void reader.cancel().catch(() => undefined); // a slow sender must not hold the connection
+  }, READ_TIMEOUT_MS);
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (timedOut) return "timeout";
+      if (done) break;
+      if (total + value.byteLength > MAX_AUDIO_BYTES) {
+        await reader.cancel(); // stop reading; nothing over the limit was kept
+        return "too_large";
+      }
+      chunks.push(value);
+      total += value.byteLength;
     }
-    chunks.push(value);
-    total += value.byteLength;
+  } finally {
+    clearTimeout(timer);
   }
   const body = new Uint8Array(total);
   let offset = 0;
@@ -102,14 +120,15 @@ export async function POST(request: Request): Promise<Response> {
     return failure("too_large", 413);
   }
 
-  let audio: Uint8Array | undefined;
+  let audio: Uint8Array | "too_large" | "timeout";
   try {
     audio = await readBounded(request);
   } catch {
     // The visitor cancelled or left while the upload was still arriving.
     return failure("failed", 400);
   }
-  if (audio === undefined) return failure("too_large", 413);
+  if (audio === "too_large") return failure("too_large", 413);
+  if (audio === "timeout") return failure("timeout", 504);
   if (audio.byteLength === 0) return failure("invalid", 422);
 
   const result = await sendTranscription(audio, type, request.signal);

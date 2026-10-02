@@ -293,6 +293,24 @@ describe("no storage", () => {
   });
 });
 
+describe("a capture that nobody awaits", () => {
+  it("is not an unhandled rejection when it is cancelled", async () => {
+    media = installMedia();
+    const unhandled = vi.fn();
+    process.on("unhandledRejection", unhandled);
+    try {
+      const capture = await startCapture();
+      capture.cancel(); // `result` is never awaited
+      await vi.advanceTimersByTimeAsync(10);
+      await Promise.resolve();
+    } finally {
+      process.off("unhandledRejection", unhandled);
+    }
+    expect(unhandled).not.toHaveBeenCalled();
+    expect(media.streams[0].allStopped).toBe(true);
+  });
+});
+
 describe("a microphone that must not stay on", () => {
   it("cancel releases the tracks at once, before the recorder reports its stop", async () => {
     media = installMedia();

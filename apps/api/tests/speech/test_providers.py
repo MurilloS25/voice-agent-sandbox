@@ -29,7 +29,7 @@ from voice_agent_api.speech.providers import GroqSpeechToText, build_speech_to_t
 
 FAKE_KEY = "fake-offline-credential-for-tests-0001"
 MODEL = "some/whisper-model"
-SECRET_BODY = "SECRET-PROVIDER-DETAIL-4417"
+LEAK_MARKER = "SECRET-PROVIDER-DETAIL-4417"
 
 
 def settings(**overrides: Any) -> Settings:
@@ -169,15 +169,15 @@ def test_http_errors_become_fixed_errors_with_one_request_and_no_leak(
     status: int, expected: type[SpeechError], caplog: pytest.LogCaptureFixture
 ) -> None:
     caplog.set_level(logging.DEBUG)
-    transport = Transport((status, {"error": {"message": SECRET_BODY}}), (200, {"text": "late"}))
+    transport = Transport((status, {"error": {"message": LEAK_MARKER}}), (200, {"text": "late"}))
 
     with pytest.raises(expected) as raised:
         adapter(transport).transcribe(clip())
 
     assert len(transport.requests) == 1  # max_retries=0: a 429 or 5xx costs exactly one request
-    assert SECRET_BODY not in str(raised.value) and FAKE_KEY not in str(raised.value)
+    assert LEAK_MARKER not in str(raised.value) and FAKE_KEY not in str(raised.value)
     assert raised.value.__cause__ is None
-    assert SECRET_BODY not in caplog.text and FAKE_KEY not in caplog.text
+    assert LEAK_MARKER not in caplog.text and FAKE_KEY not in caplog.text
     assert f"status={status}" in caplog.text  # only the class name and status are logged
     assert all(record.exc_info is None for record in caplog.records)
 
@@ -187,19 +187,19 @@ def test_timeouts_and_connection_failures_are_fixed_errors(
 ) -> None:
     caplog.set_level(logging.DEBUG)
     with pytest.raises(TranscriptionTimeout):
-        adapter(Transport(httpx.ReadTimeout(SECRET_BODY))).transcribe(clip())
+        adapter(Transport(httpx.ReadTimeout(LEAK_MARKER))).transcribe(clip())
     with pytest.raises(TranscriptionFailed):
-        adapter(Transport(httpx.ConnectError(SECRET_BODY))).transcribe(clip())
-    assert SECRET_BODY not in caplog.text
+        adapter(Transport(httpx.ConnectError(LEAK_MARKER))).transcribe(clip())
+    assert LEAK_MARKER not in caplog.text
 
 
 def test_classification_reads_only_class_names_and_status_never_the_message() -> None:
     class Weird(Exception):
         status_code = 429
 
-    assert isinstance(providers.classify_provider_error(Weird(SECRET_BODY)), TranscriptionFailed)
+    assert isinstance(providers.classify_provider_error(Weird(LEAK_MARKER)), TranscriptionFailed)
     assert isinstance(
-        providers.classify_provider_error(TimeoutError(SECRET_BODY)), TranscriptionTimeout
+        providers.classify_provider_error(TimeoutError(LEAK_MARKER)), TranscriptionTimeout
     )
 
 
@@ -208,7 +208,7 @@ def test_the_route_returns_the_transcript_and_never_the_key_or_provider_text(
 ) -> None:
     caplog.set_level(logging.DEBUG)
     transport = Transport(
-        (200, {"text": "Do you open on Saturdays"}), (500, {"error": SECRET_BODY})
+        (200, {"text": "Do you open on Saturdays"}), (500, {"error": LEAK_MARKER})
     )
     service = SpeechService(adapter(transport))
     app, _ = build_app(None)
@@ -222,7 +222,7 @@ def test_the_route_returns_the_transcript_and_never_the_key_or_provider_text(
     assert ok.status_code == 200 and ok.json()["text"] == "Do you open on Saturdays"
     assert failed.status_code == 502 and failed.json()["error"]["code"] == "transcription_failed"
     for text in (ok.text, failed.text, caplog.text):
-        assert FAKE_KEY not in text and SECRET_BODY not in text
+        assert FAKE_KEY not in text and LEAK_MARKER not in text
     assert "Do you open on Saturdays" not in caplog.text  # the transcript is never logged
 
 

@@ -7,7 +7,7 @@ const { sendTranscription } = vi.hoisted(() => ({
 }));
 vi.mock("@/lib/api/client", () => ({ sendTranscription }));
 
-import { POST } from "./route";
+import { POST, READ_TIMEOUT_MS } from "./route";
 
 const URL_BASE = "http://localhost:3000/api/voice/transcribe";
 const LIMIT = 512 * 1024;
@@ -137,6 +137,36 @@ describe("validation before anything is forwarded", () => {
     expect(response.status).toBe(200);
     const sent = sendTranscription.mock.calls[0][0] as Uint8Array;
     expect(sent.byteLength).toBe(LIMIT);
+  });
+});
+
+describe("an upload that is too slow", () => {
+  it("is cut off at the read deadline and forwards nothing", async () => {
+    vi.useFakeTimers();
+    try {
+      const stream = new ReadableStream<Uint8Array>(
+        {
+          pull(controller) {
+            controller.enqueue(new Uint8Array(10));
+            return new Promise<void>(() => undefined); // then nothing more ever arrives
+          },
+        },
+        { highWaterMark: 0 },
+      );
+      const pending = POST(audioRequest(stream));
+      await vi.advanceTimersByTimeAsync(READ_TIMEOUT_MS + 10);
+      const response = await pending;
+      expect(response.status).toBe(504);
+      expect(await response.json()).toEqual({ error: "timeout" });
+      expect(sendTranscription).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not trip the deadline for an upload that finishes in time", async () => {
+    const response = await POST(audioRequest(new Uint8Array(100)));
+    expect(response.status).toBe(200);
   });
 });
 

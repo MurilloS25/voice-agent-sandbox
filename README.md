@@ -4,16 +4,20 @@ Portfolio project exploring how a voice-enabled AI agent can handle realistic bu
 
 ## Status
 
-Three milestones are implemented:
+Four milestones are implemented:
 
 - Foundation ([plan](docs/plans/0001-project-foundation.md)): a FastAPI backend with deterministic availability for a fictional bicycle workshop, and a Next.js page that shows its services, opening hours, and open appointment times.
 - Booking with explicit confirmation ([plan](docs/plans/0002-booking-persistence.md)): pick an open time, review exactly what will be booked, and confirm it explicitly. Confirmation re-checks availability transactionally, assigns one of two benches, is idempotent, and detects a changed catalog or a taken slot without writing. It runs in memory by default and against a Supabase PostgreSQL development project when configured: the migrations are applied, the integration tests pass against the real database, and the full flow was verified through the production web build and a scripted headless browser. Server-side SSL enforcement is not enabled yet (clients already verify the certificate), and a hand review on a real phone and screen reader is still open (see the plan).
 
 - Text agent ([plan 0003](docs/plans/0003-text-agent-orchestration.md), [ADR 0007](docs/decisions/0007-agent-orchestration-and-tool-boundary.md), [ADR 0008](docs/decisions/0008-model-provider-adapter-and-selection.md)): a text-first booking assistant at `/assistant` for the fictional shop. A hand-written LangGraph turn graph runs four typed, allow-listed tools that read business facts and availability and prepare a booking review; the agent cannot book. A time can be reviewed only if it was offered in an earlier turn, and booking still happens only when the visitor presses the existing **Confirm booking** button. Conversations are held in memory with idempotent turns (within one API process), every model and tool call is time-bounded, and a structured execution timeline shows what the visitor said, what the assistant asked tools to do and what they returned. A Groq adapter sits behind a provider-neutral factory and is **disabled by default**; without a provider the page shows a notice with a link to the booking form. The model selected after paced live evaluations is `openai/gpt-oss-120b`, set through `AGENT_MODEL` (nothing is hard-coded): it passed 12 of 12 scenarios in the final run, after earlier runs of the same model had failed some (one sample of a nondeterministic model). A real-provider browser check ran one two-turn conversation through the existing confirmation, with one appointment created and a replay creating no duplicate.
 
-Limits of this milestone: conversations live in one process's memory and are lost on restart; turn idempotency does not survive a restart; there is no rate limit or spend cap, which is required before any public deployment; the Groq setup assumes the operator enabled Zero Data Retention on their own account (the repository cannot verify it); voice, streaming, persisted conversations, authentication, rescheduling, cancellation and deployment are not built. This is a portfolio demo with fictional data, not a production-ready system.
+Limits of this milestone: conversations live in one process's memory and are lost on restart; turn idempotency does not survive a restart; there is no rate limit or spend cap, which is required before any public deployment; the Groq setup assumes the operator enabled Zero Data Retention on their own account (the repository cannot verify it); streaming, persisted conversations, authentication, rescheduling, cancellation and deployment are not built (voice is described in the next bullet). This is a portfolio demo with fictional data, not a production-ready system.
 
-Voice, streaming, authentication, rescheduling, cancellation, persisted conversations and deployment are not built yet.
+- Voice ([plan 0004](docs/plans/0004-voice-experience.md), [ADR 0009](docs/decisions/0009-voice-input-and-spoken-output.md)): voice as an input and output layer around the same text agent, offline-verified. On `/assistant` the visitor presses **Speak**, says one short sentence and presses **Stop**; the recording goes through a same-origin route handler to `POST /v1/speech/transcriptions`, and the transcript appears in the message box, editable and never sent automatically. The agent, its tools and the booking confirmation are unchanged: voice adds no capability and no write path. Replies can be read aloud by the browser's own synthesized voice (Listen/Stop per reply, and a "Read replies aloud" switch that is off by default); a network-only voice needs an explicit opt-in because the browser or operating system may send the reply text to an external service. Speech-to-text sits behind a provider-neutral port with an offline scripted fake (accepted only when `APP_ENV` is explicitly `development` or `test`) and an optional Groq adapter, both **disabled by default** (`SPEECH_PROVIDER=disabled`). No audio is stored anywhere: it exists in browser memory until upload and in API memory for one request. Everything above was verified offline and in a scripted headless-browser rehearsal (fake microphone, fake transcription, scripted model); **nothing was run against a real speech provider, a real microphone or a real speech synthesis voice**.
+
+Limits of the voice milestone: the server enforces the byte limit (512 KB), the container family, concurrency and time, and does **not** measure how long the audio is (the 15 s and 0.3 s limits are enforced in the browser only); there is no public rate limit or spend cap on transcription, which is required before any public deployment (Milestone 5); the Groq adapter has not been exercised against the real service and assumes the operator enabled Zero Data Retention on their own account; voice is English only.
+
+Streaming, authentication, rescheduling, cancellation, persisted conversations, telephony and deployment are not built yet.
 
 ## Start here
 
@@ -53,7 +57,7 @@ The business, services, and seeded bookings are fictional. By default (`APPOINTM
 - Python and FastAPI
 - LangGraph / LangChain
 - Supabase PostgreSQL
-- Browser speech APIs for the initial prototype
+- Browser capture (`MediaRecorder`) and the browser's `speechSynthesis`, with speech-to-text behind a provider-neutral port (optional Groq adapter)
 - Vercel for the web experience
 
 ## Data approach

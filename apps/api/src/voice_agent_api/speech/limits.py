@@ -4,8 +4,9 @@ The server enforces only what it can enforce: the byte limit, the container fami
 time. It does not verify the real duration of the audio (see `sniff.py` and the plan).
 
 Worst case from route entry to response is `read_timeout_s + provider_timeout_s` = 9 s with the
-defaults. The web client allows that bound plus `WEB_MARGIN_S` (14 s); the matching web constant
-arrives with the capture UI, and `tests/speech/test_budget.py` pins the server side now.
+defaults. The web client allows that bound plus `WEB_MARGIN_S` (14 s): that is
+`SPEECH_TIMEOUT_MS` in `apps/web/src/lib/api/client.ts`, and `tests/speech/test_budget.py` pins the
+two sides together.
 """
 
 from dataclasses import dataclass

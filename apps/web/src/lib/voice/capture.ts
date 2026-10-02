@@ -206,6 +206,9 @@ export async function startCapture(
     resolveResult = resolve;
     rejectResult = reject;
   });
+  // A capture abandoned before anyone awaits it rejects with `cancelled`: that is expected, and
+  // must not surface as an unhandled rejection. Callers that await `result` still see it.
+  result.catch(() => undefined);
 
   /** Releases the microphone, the timer and every reference to the audio. Idempotent. */
   const release = () => {
