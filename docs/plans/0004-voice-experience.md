@@ -1,6 +1,6 @@
 # Plan 0004 — Voice experience
 
-Status: accepted; implementation in progress. Phase 4A (contracts, limits and STT port) is being implemented; 4B to 4F are not started. The branch is `feature/voice-experience`, created from `5b08ef0` (a squash commit with a single parent, `253fb59`; PR #2 is merged). Research sources were consulted on 2026-10-01 and are listed at the end.
+Status: accepted; implementation in progress. Phases 4A (contracts, limits and STT port) and 4B (adapters and configuration) are done; 4C to 4E are being implemented offline; 4F (checkpoints C1 to C3) has not started. The branch is `feature/voice-experience`, created from `5b08ef0` (a squash commit with a single parent, `253fb59`; PR #2 is merged). Research sources were consulted on 2026-10-01 and are listed at the end.
 
 # Outcome
 
@@ -113,7 +113,7 @@ New settings (validated like the others; invalid values fail closed with only th
 - `APP_ENV`: `development` | `test` | `production`, default `production`.
 - `SPEECH_PROVIDER`: `disabled` (default) | `fake` | `groq`.
 - `SPEECH_MODEL`: required for `groq`, no default, not a placeholder.
-- `SPEECH_TIMEOUT_S` (default 6), `SPEECH_MAX_AUDIO_BYTES` (default 524288), `SPEECH_MAX_CONCURRENT` (default 2).
+- `SPEECH_TIMEOUT_S` (default 6), `SPEECH_READ_TIMEOUT_S` (default 3; added in 4B because the body read has its own budget), `SPEECH_MAX_AUDIO_BYTES` (default 524288), `SPEECH_MAX_CONCURRENT` (default 2). Their upper bounds are the defaults (6 s, 3 s, 512 KB; at most 4 concurrent): configuration can only lower the budget, so the 14 s web timeout always covers a request (a test pins the caps).
 
 Rules: `disabled` needs nothing and the route answers 503. `groq` reuses `GROQ_API_KEY` (the existing validation applies) and requires `SPEECH_MODEL`; the endpoint is pinned to `https://api.groq.com`, tracing is refused and the provider loggers stay at WARNING, as in ADR 0008. `fake` is accepted **only** when `APP_ENV` is explicitly `development` or `test`; with the default `production` it fails startup, so the fake cannot be enabled by accident in a public environment. `.env.example` gets placeholders only; `secrets generate` never writes provider values; `secrets check` reports the speech provider by name only.
 

@@ -10,6 +10,8 @@ arrives with the capture UI, and `tests/speech/test_budget.py` pins the server s
 
 from dataclasses import dataclass
 
+from voice_agent_api.config import Settings
+
 WEB_MARGIN_S = 5.0  # the same margin as booking requests and agent turns
 MAX_DECLARED_DURATION_MS = 60_000
 
@@ -20,6 +22,15 @@ class SpeechLimits:
     read_timeout_s: float = 3.0  # the whole request body
     provider_timeout_s: float = 6.0  # the wait for the transcription call
     max_concurrent: int = 2  # transcriptions in flight, abandoned ones included
+
+    @classmethod
+    def from_settings(cls, settings: Settings) -> "SpeechLimits":
+        return cls(
+            max_audio_bytes=settings.speech_max_audio_bytes,
+            read_timeout_s=settings.speech_read_timeout_s,
+            provider_timeout_s=settings.speech_timeout_s,
+            max_concurrent=settings.speech_max_concurrent,
+        )
 
     @property
     def server_bound_s(self) -> float:

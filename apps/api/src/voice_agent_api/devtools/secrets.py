@@ -110,13 +110,23 @@ def check(path: Path, connect: bool) -> int:
     postgres: Settings = settings.model_copy(update={"appointment_store": "postgres"})
     failed = failed_settings(postgres)
     agent_names = ("GROQ_API_KEY", "AGENT_MODEL")
-    for name in sorted(set(_SECRET_NAMES) | set(failed) - set(agent_names)):
+    speech_names = ("GROQ_API_KEY", "SPEECH_MODEL", "APP_ENV")
+    handled = set(agent_names) | set(speech_names)
+    for name in sorted(set(_SECRET_NAMES) | (set(failed) - handled)):
         print(f"{'FAIL' if name in failed else 'ok  '}: {name}")
     # The provider is optional: nothing is required (and no key is inspected) while it is disabled.
     if settings.agent_provider == "disabled":
         print("ok  : AGENT_PROVIDER=disabled (GROQ_API_KEY and AGENT_MODEL not required)")
     else:
         for name in agent_names:
+            print(f"{'FAIL' if name in failed else 'ok  '}: {name}")
+    # Voice input is optional too. Only names and pass or fail are printed, never a value.
+    if settings.speech_provider == "disabled":
+        print("ok  : SPEECH_PROVIDER=disabled (SPEECH_MODEL not required)")
+    elif settings.speech_provider == "fake":
+        print(f"{'FAIL' if 'APP_ENV' in failed else 'ok  '}: APP_ENV (required for the fake)")
+    else:
+        for name in ("GROQ_API_KEY", "SPEECH_MODEL"):
             print(f"{'FAIL' if name in failed else 'ok  '}: {name}")
     if failed:
         return 1

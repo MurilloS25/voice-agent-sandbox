@@ -1,0 +1,42 @@
+# Voice is an input and output layer around the text agent: bounded raw-audio transcription, browser synthesis
+
+- Status: accepted for the offline scope (plan 0004, phases 4A to 4E). Behavior against the real provider is **unverified**: checkpoints C1 to C3 have not been run.
+- Date: 2026-10-01
+
+## Context
+
+Milestone 4 adds voice to the existing text agent ([ADR 0007](0007-agent-orchestration-and-tool-boundary.md)). The agent, its tools, the conversation store and the confirmation path must not change: voice must not add a capability or a write path. A recording of a voice is sensitive even when what is said is fictional, a provider call blocks a thread, and an upload endpoint is the easiest place to exhaust memory or disk. Research on 2026-10-01 (sources in [plan 0004](../plans/0004-voice-experience.md)) found that Starlette spools multipart files over 1 MB to disk with no per-file size limit, that the browser's own speech recognition sends audio to a vendor and is not reproducible, and that Groq's only text-to-speech model is a preview in English.
+
+## Decision
+
+**Hybrid architecture.** The browser records one short clip (`getUserMedia` and `MediaRecorder`), the API transcribes it behind a provider-neutral port, the visitor sees and may edit the text, and presses **Send**, which is the unchanged text turn. Replies are optionally read aloud by the browser's `speechSynthesis`. There is no server text-to-speech, no streaming, no automatic voice detection, no auto-send, and nothing confirms a booking by voice.
+
+**The transcription route reads the raw body, incrementally.** `POST /v1/speech/transcriptions` is an `async def` route because `request.stream()` is asynchronous. It does not use `UploadFile`, multipart, `Request.body()` or a `bytes` parameter, none of which bounds memory before the whole body is read. Before a chunk is added the route checks `current + len(chunk) <= limit` (512 KB); an over-limit chunk is not added, the stream is closed instead of drained, and the answer is 413. The guarantee is exactly that **the application accumulator never retains more than the configured limit**; the ASGI server may still hand over one transient chunk larger than that before the check runs. `Content-Length` only rejects early and is never trusted to accept. Nothing is written to disk.
+
+**The blocking provider call never runs on the event loop.** `SpeechService` owns one dedicated pool (as many workers as slots, created once, closed with the application lifespan) and a slot counter (default 2) taken before submitting and released only when the call itself ends. A call whose wait ended (deadline or client cancel) cannot be cancelled: it is abandoned, keeps its slot until it finishes, and its result is dropped unread, so a late result touches no state and writes no log line. The worker returns a value and never raises, so nothing is left unretrieved.
+
+**What the server enforces, and what it does not.** The server enforces the byte limit, the container family (declared type and magic bytes must agree), concurrency and time. It does **not** verify the real duration. The 15 s maximum and 0.3 s minimum are client-side controls, and `X-Audio-Duration-Ms` is client-controlled: it is validated for syntax and range and recorded as `declared_duration_ms`, never treated as a measurement. Measuring the true length of WebM, Ogg, MP4 and WAV reliably needs ffmpeg, PyAV or fragile parsers, which this milestone does not add. A signature recognises only the container: it does not prove playable audio, and the EBML check admits Matroska as WebM and `ftyp` admits any ISO base media file. The real duration is a residual risk until Milestone 5; the byte cap and the lack of a public deployment reduce abuse of the provider quota but do not eliminate it.
+
+**Configuration fails closed.** `SPEECH_PROVIDER` is `disabled` (the route answers 503), `fake` or `groq`; `SPEECH_MODEL` has no default and is never in code. The offline fake exists for tests and development and is accepted **only** when `APP_ENV` is explicitly `development` or `test`; `APP_ENV` defaults to `production`, so a public environment cannot enable the fake by accident (validation rejects it by name, and the factory refuses it again). `groq` needs the existing `GROQ_API_KEY` and a model. The timeout and size settings can only be lowered: their upper bounds are the plan's budget (3 s to read, 6 s for the provider, 512 KB), which keeps every request inside the 14 s the web client allows. A test pins this.
+
+**The Groq adapter** uses the installed `groq` SDK (0.37.1; no dependency was added), imported inside the adapter. The base URL is pinned to `https://api.groq.com` (the SDK appends `/openai/v1/audio/transcriptions`), `GROQ_BASE_URL` in the environment is ignored, `max_retries=0`, no streaming, `language="en"`, `response_format="json"`, and the key travels only in the `Authorization` header. An SDK exception is reduced to a fixed typed error from its class names and HTTP status alone (a timeout, 413, a 4xx that means the audio was rejected, anything else is `transcription_failed`); its message, body and the audio are never logged or returned. The SDK's loggers are pinned to WARNING, and tracing environment variables (the same set as for the agent) stop startup, naming only the variable. Tests drive the real SDK over a mock HTTP transport and block non-loopback sockets.
+
+**Spoken output is the browser's, and is not assumed to be local.** A voice with `localService=false` may make the browser or operating system send the reply text to an external service, so a local voice is preferred, a network voice needs a visible explanation and the visitor's opt-in, and the feature is labelled "Synthesized voice". Nothing is spoken without a visitor action, only visible assistant reply text is ever spoken (never the proposal token, a hidden input, the timeline or system notices), and a missing `speechSynthesis` or an empty voice list never breaks the chat.
+
+## Consequences
+
+- The agent and the booking path are untouched; voice only fills the message box. A transcript is machine output until the visitor sends it.
+- Audio exists only in browser memory until upload and in API memory for one request. The audio is sent to the transcription provider; Groq documented on 2026-10-01 that audio endpoints keep no data by default except for troubleshooting or abuse (up to 30 days) and that Zero Data Retention can be turned on per organisation. Whether it is on is the operator's setting and cannot be verified from this repository; C1 is where it is confirmed.
+- Provider limits (a 10 s minimum billed per request, 20 requests per minute on the free tier at that date) are documented, not relied on; the model is configuration and is re-verified at C1.
+- Until Milestone 5 there is no public rate limit or spend cap. Worker threads are not daemons, so a hung provider call can delay process exit until its own timeout.
+- English only. Spanish, hold-to-talk as an addition, a browser-recognition fallback and server-side text-to-speech are deferred.
+
+## Alternatives considered
+
+- **Browser SpeechRecognition only:** sends audio to a browser or operating-system vendor, has no Firefox support and cannot be tested offline.
+- **`UploadFile` or multipart:** spools to disk over 1 MB with no per-file limit.
+- **`Request.body()` or a `bytes` body parameter:** accumulates everything before the size can be checked.
+- **A synchronous route with a threadpool:** cannot consume the asynchronous stream incrementally.
+- **Server-side duration inspection with ffmpeg or PyAV:** a heavy dependency for a limit the byte cap already bounds; deferred.
+- **Server text-to-speech or a realtime provider:** cost, complexity and privacy exposure, and out of scope.
+- **Auto-sending the transcript:** the visitor would not approve text before it reaches the model, and a recognition error would spend a turn.

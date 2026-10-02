@@ -30,6 +30,8 @@ def test_the_speech_package_exists_and_is_scanned() -> None:
         "limits.py",
         "ports.py",
         "sniff.py",
+        "fake.py",
+        "providers.py",
     }
 
 
@@ -53,10 +55,13 @@ def test_the_agent_does_not_import_speech(path: Path) -> None:
         assert not module.startswith("voice_agent_api.speech"), f"{path.name} imports {module}"
 
 
+# The one module that may know a vendor SDK, and only inside a function.
+ALLOWED_VENDOR_IMPORTS = {"providers.py": ("groq",)}
+
+
 @pytest.mark.parametrize("path", SPEECH_FILES, ids=lambda p: p.name)
-def test_speech_has_no_provider_sdk_no_network_and_no_files(path: Path) -> None:
+def test_speech_has_no_stray_sdk_network_or_file_access(path: Path) -> None:
     banned = {
-        "groq",
         "langchain_groq",
         "openai",
         "httpx",
@@ -67,13 +72,35 @@ def test_speech_has_no_provider_sdk_no_network_and_no_files(path: Path) -> None:
         "tempfile",
         "shutil",
         "subprocess",
+        "groq",
     }
+    allowed = ALLOWED_VENDOR_IMPORTS.get(path.name, ())
     for module in modules_imported(path):
-        assert module.split(".")[0] not in banned, f"{path.name} imports {module}"
+        root = module.split(".")[0]
+        assert root not in banned or root in allowed, f"{path.name} imports {module}"
     tree = ast.parse(path.read_text(encoding="utf-8"))
     for node in ast.walk(tree):
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
             assert node.func.id != "open", f"{path.name} opens a file"
+
+
+def test_only_the_provider_module_imports_the_vendor_and_only_lazily() -> None:
+    importers = []
+    for path in SPEECH_FILES:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        if any(m.split(".")[0] == "groq" for m in modules_imported(path)):
+            importers.append(path.name)
+            for node in tree.body:  # module level only; function bodies are nested
+                if isinstance(node, ast.Import):
+                    names = [a.name for a in node.names]
+                elif isinstance(node, ast.ImportFrom):
+                    names = [node.module or ""]
+                else:
+                    continue
+                assert not any(n.split(".")[0] == "groq" for n in names), (
+                    "groq must be imported inside the adapter, not at module level"
+                )
+    assert importers == ["providers.py"]
 
 
 def test_the_route_reads_the_stream_and_never_uses_an_accumulating_api() -> None:

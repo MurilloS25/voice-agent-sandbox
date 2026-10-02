@@ -82,6 +82,20 @@ class Settings(BaseSettings):
         "include_reasoning"
     )
 
+    # Voice input (plan 0004). `production` is the default so that nothing enabled by mistake can
+    # use the offline fake: `SPEECH_PROVIDER=fake` is accepted only with `APP_ENV` explicitly set
+    # to `development` or `test`. `disabled` is the default provider: the speech route then answers
+    # 503 and no key or model is needed. There is no default model id (ADR 0009).
+    app_env: Literal["development", "test", "production"] = "production"
+    speech_provider: Literal["disabled", "fake", "groq"] = "disabled"
+    speech_model: str | None = None
+    # The upper bounds are the plan's budget: a body read of at most 3 s plus a provider wait of at
+    # most 6 s keeps a request inside the 14 s the web client allows (tests/speech/test_budget.py).
+    speech_timeout_s: float = Field(6.0, gt=0, le=6.0)
+    speech_read_timeout_s: float = Field(3.0, gt=0, le=3.0)
+    speech_max_audio_bytes: int = Field(524_288, ge=1024, le=524_288)
+    speech_max_concurrent: int = Field(2, ge=1, le=4)
+
 
 def decode_signing_key(value: str) -> bytes:
     """Decode a base64url key and reject weak ones. Raises ValueError (never shown to users)."""
@@ -141,6 +155,26 @@ def failed_agent_settings(settings: Settings) -> list[str]:
     return failed
 
 
+def failed_speech_settings(settings: Settings) -> list[str]:
+    """Names of invalid speech settings. `disabled` requires nothing (placeholders are ignored).
+    `fake` is for tests and offline development only, so it needs `APP_ENV` to be explicitly
+    `development` or `test`. `groq` needs a usable key (shared with the agent) and a model."""
+    if settings.speech_provider == "disabled":
+        return []
+    failed: list[str] = []
+    if settings.speech_provider == "fake":
+        if settings.app_env not in ("development", "test"):
+            failed.append("APP_ENV")
+        return failed
+    key = settings.groq_api_key
+    if not _usable_secret(key) or (key is not None and re.search(r"\s", key.get_secret_value())):
+        failed.append("GROQ_API_KEY")
+    model = settings.speech_model
+    if not model or _PLACEHOLDER in model.upper() or not _MODEL_ID.fullmatch(model):
+        failed.append("SPEECH_MODEL")
+    return failed
+
+
 def failed_settings(settings: Settings) -> list[str]:
     failed: list[str] = []
     key = _configured_key(settings)
@@ -154,6 +188,7 @@ def failed_settings(settings: Settings) -> list[str]:
             failed.append("PROPOSAL_SIGNING_KEY")
 
     failed.extend(failed_agent_settings(settings))
+    failed.extend(n for n in failed_speech_settings(settings) if n not in failed)
 
     if settings.appointment_store == "postgres":
         if not settings.db_host or _PLACEHOLDER in settings.db_host.upper():

@@ -25,6 +25,8 @@ from voice_agent_api.config import (
 from voice_agent_api.domain.ports import AppointmentBook, BusinessCatalog
 from voice_agent_api.infrastructure.seed import build_seed
 from voice_agent_api.speech.bounded import SpeechService
+from voice_agent_api.speech.limits import SpeechLimits
+from voice_agent_api.speech.providers import build_speech_to_text
 
 
 class Lifecycle(Protocol):
@@ -121,6 +123,15 @@ def build_agent(
     )
 
 
+def build_speech(settings: Settings) -> SpeechService | None:
+    """The speech service for the configured provider, or None when it is disabled (the default).
+    Construction makes no network call."""
+    port = build_speech_to_text(settings)
+    if port is None:
+        return None
+    return SpeechService(port, SpeechLimits.from_settings(settings))
+
+
 def create_app_from_settings(settings: Settings) -> FastAPI:
     key = resolve_signing_key(settings)
     if settings.appointment_store == "postgres":
@@ -137,6 +148,7 @@ def create_app_from_settings(settings: Settings) -> FastAPI:
             signing_key=key,
             resources=(database,),
             agent=build_agent(settings, pg_catalog, pg_book, key),
+            speech=build_speech(settings),
         )
     catalog, appointments = build_seed(system_clock(), system_clock)
     return create_app(
@@ -145,4 +157,5 @@ def create_app_from_settings(settings: Settings) -> FastAPI:
         system_clock,
         signing_key=key,
         agent=build_agent(settings, catalog, appointments, key),
+        speech=build_speech(settings),
     )
