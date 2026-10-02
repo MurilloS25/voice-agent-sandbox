@@ -33,6 +33,16 @@ from voice_agent_api.domain.errors import (
     SlotUnavailable,
     StorageUnavailable,
 )
+from voice_agent_api.speech.errors import (
+    AudioInvalid,
+    AudioTooLarge,
+    AudioUnsupported,
+    NoSpeech,
+    SpeechBusy,
+    SpeechUnavailable,
+    TranscriptionFailed,
+    TranscriptionTimeout,
+)
 
 logger = logging.getLogger("voice_agent_api")
 
@@ -77,6 +87,14 @@ _DOMAIN_ERRORS: dict[type[DomainError], tuple[int, str]] = {
     TurnOutOfOrder: (409, "turn_out_of_order"),
     ConversationLimitReached: (409, "conversation_limit_reached"),
     AgentBusy: (429, "agent_busy"),
+    AudioTooLarge: (413, "audio_too_large"),
+    AudioUnsupported: (415, "audio_unsupported"),
+    AudioInvalid: (422, "audio_invalid"),
+    NoSpeech: (422, "no_speech"),
+    SpeechBusy: (429, "speech_busy"),
+    TranscriptionFailed: (502, "transcription_failed"),
+    SpeechUnavailable: (503, "speech_unavailable"),
+    TranscriptionTimeout: (504, "transcription_timeout"),
 }
 
 

@@ -1,6 +1,6 @@
 # Plan 0004 — Voice experience
 
-Status: proposed, awaiting final review. Nothing is implemented; the branch is `feature/voice-experience`, created from `5b08ef0` (a squash commit with a single parent, `253fb59`; PR #2 is merged). Research sources were consulted on 2026-10-01 and are listed at the end.
+Status: accepted; implementation in progress. Phase 4A (contracts, limits and STT port) is being implemented; 4B to 4F are not started. The branch is `feature/voice-experience`, created from `5b08ef0` (a squash commit with a single parent, `253fb59`; PR #2 is merged). Research sources were consulted on 2026-10-01 and are listed at the end.
 
 # Outcome
 

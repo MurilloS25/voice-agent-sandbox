@@ -1104,6 +1104,30 @@
         "title": "ToolResultEvent",
         "type": "object"
       },
+      "TranscriptionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "language": {
+            "const": "en",
+            "description": "Transcription is English only for now.",
+            "title": "Language",
+            "type": "string"
+          },
+          "text": {
+            "description": "Machine-transcribed text. The visitor can edit it before sending it.",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text",
+          "language"
+        ],
+        "title": "TranscriptionResponse",
+        "type": "object"
+      },
       "TurnErrorEvent": {
         "additionalProperties": false,
         "properties": {
@@ -1663,6 +1687,158 @@
         "summary": "Read Availability",
         "tags": [
           "availability"
+        ]
+      }
+    },
+    "/v1/speech/transcriptions": {
+      "post": {
+        "description": "Transcribe one short recording. It does not call the assistant and stores nothing.",
+        "operationId": "create_transcription_v1_speech_transcriptions_post",
+        "parameters": [
+          {
+            "description": "What the client says the recording lasts. Not verified by the server: diagnostics only.",
+            "in": "header",
+            "name": "X-Audio-Duration-Ms",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "ge": 0,
+                  "le": 60000,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "What the client says the recording lasts. Not verified by the server: diagnostics only.",
+              "title": "X-Audio-Duration-Ms"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "audio/mp4": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            },
+            "audio/ogg": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            },
+            "audio/wav": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            },
+            "audio/webm": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            }
+          },
+          "description": "The raw audio bytes of one short recording (at most 512 KB).",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TranscriptionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "audio_too_large: more than 512 KB."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "audio_unsupported: type not allowed, or the signature does not match it."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "audio_invalid, no_speech or validation_error."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "speech_busy: every transcription slot is taken.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait before retrying.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "transcription_failed."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "speech_unavailable: no provider is configured."
+          },
+          "504": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "transcription_timeout."
+          }
+        },
+        "summary": "Create Transcription",
+        "tags": [
+          "speech"
         ]
       }
     }
