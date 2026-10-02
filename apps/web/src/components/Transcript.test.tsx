@@ -154,6 +154,25 @@ describe("Transcript", () => {
     expect(container.innerHTML).not.toContain(TOKEN);
   });
 
+  it("labels each booking review by its reply so landmarks stay unique", () => {
+    render(
+      <Transcript
+        idPrefix="t"
+        turns={[
+          { message: "a", response: reviewTurn(1) },
+          { message: "b", response: reviewTurn(2) },
+        ]}
+        liveReviewTurn={2}
+      />,
+    );
+    expect(
+      screen.getByRole("region", { name: "Booking review for reply 1" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("region", { name: "Booking review for reply 2" }),
+    ).toBeInTheDocument();
+  });
+
   it("moves focus to the response of the turn it is told to", () => {
     const turns = [
       { message: "a", response: agentTurn(1) },

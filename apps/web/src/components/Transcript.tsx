@@ -127,11 +127,19 @@ function assistantAgainHref(review: Review): string {
   });
 }
 
-function ReviewBlock({ review, live }: { review: Review; live: boolean }) {
+function ReviewBlock({
+  review,
+  live,
+  turnIndex,
+}: {
+  review: Review;
+  live: boolean;
+  turnIndex: number;
+}) {
   const again = assistantAgainHref(review);
   return (
     <section
-      aria-label="Booking review"
+      aria-label={`Booking review for reply ${turnIndex}`}
       className="max-w-2xl border-2 border-l-8 border-bottle bg-white p-4 sm:ml-12"
     >
       <p className="font-bold">
@@ -220,6 +228,7 @@ export function Transcript({
               {review ? (
                 <ReviewBlock
                   review={review}
+                  turnIndex={response.turn_index}
                   live={!readOnly && liveReviewTurn === response.turn_index}
                 />
               ) : null}

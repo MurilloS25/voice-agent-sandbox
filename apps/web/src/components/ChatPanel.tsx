@@ -139,6 +139,19 @@ export function ChatPanel({ initialDraft = "" }: { initialDraft?: string }) {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [earlier, setEarlier] = useState<Conversation[]>([]);
   const [draft, setDraft] = useState(initialDraft);
+  // A link can change the context while the chat is open (for example "Review again"). Each new
+  // context is looked at once: it prepares the draft only if the box is empty, and the cursor
+  // goes there. Text the visitor wrote is never changed, and an ignored or applied context does
+  // not come back after the box is cleared. The conversation is never reset.
+  const [seenDraft, setSeenDraft] = useState(initialDraft);
+  const [contextFocus, setContextFocus] = useState(0);
+  if (initialDraft !== seenDraft) {
+    setSeenDraft(initialDraft);
+    if (initialDraft !== "" && draft.trim() === "") {
+      setDraft(initialDraft);
+      setContextFocus((count) => count + 1);
+    }
+  }
 
   const [pending, setPending] = useState<Pending | null>(null);
   const [phase, setPhase] = useState<Phase>({ kind: "idle", replied: false });
@@ -242,6 +255,15 @@ export function ChatPanel({ initialDraft = "" }: { initialDraft?: string }) {
     box.focus();
     box.setSelectionRange(box.value.length, box.value.length);
   }, [transcripts]);
+
+  // A context that arrived while the page was open puts the cursor in the prepared draft.
+  useEffect(() => {
+    if (contextFocus === 0) return;
+    const box = textareaRef.current;
+    if (!box) return;
+    box.focus();
+    box.setSelectionRange(box.value.length, box.value.length);
+  }, [contextFocus]);
 
   /**
    * A quick start fills the box, and only when it is empty: text the visitor wrote is never

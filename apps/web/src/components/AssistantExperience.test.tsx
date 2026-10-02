@@ -141,14 +141,75 @@ describe("a draft from a link", () => {
     expect(box()).toHaveValue("Something else");
   });
 
-  it("exists only at initialization: a later context never fills or replaces the box", () => {
+  it("prepares the draft when the chat is already open and the box is empty, and focuses it", () => {
     const { rerender } = render(<ChatPanel />);
-    rerender(<ChatPanel initialDraft="Later" />);
-    expect(box()).toHaveValue("");
+    expect(box()).not.toHaveFocus();
+    rerender(<ChatPanel initialDraft="Do you have time for Flat repair?" />);
+    expect(box()).toHaveValue("Do you have time for Flat repair?");
+    expect(box()).toHaveFocus();
+    expect(sendTurn).not.toHaveBeenCalled();
+    expect(uuid.calls).toBe(0);
+  });
+
+  it("treats a box with only spaces as empty for a context that arrives later", () => {
+    const { rerender } = render(<ChatPanel />);
+    type("   ");
+    rerender(<ChatPanel initialDraft="Later context" />);
+    expect(box()).toHaveValue("Later context");
+  });
+
+  it("keeps text the visitor wrote when a context arrives: no change, no concatenation, no send", () => {
+    const { rerender } = render(<ChatPanel />);
     type("Typed by the visitor");
-    rerender(<ChatPanel initialDraft="Another" />);
+    rerender(<ChatPanel initialDraft="Do you have time for Flat repair?" />);
     expect(box()).toHaveValue("Typed by the visitor");
     expect(sendTurn).not.toHaveBeenCalled();
+  });
+
+  it("does not bring an old context back when the box is cleared afterwards", () => {
+    const { rerender } = render(<ChatPanel />);
+    type("Typed by the visitor");
+    rerender(<ChatPanel initialDraft="Ignored context" />); // ignored
+    type("");
+    expect(box()).toHaveValue("");
+    rerender(<ChatPanel initialDraft="Ignored context" />); // same context, same page
+    expect(box()).toHaveValue("");
+
+    rerender(<ChatPanel initialDraft="Applied later" />); // a new one, box empty: applies
+    expect(box()).toHaveValue("Applied later");
+    type("");
+    rerender(<ChatPanel initialDraft="Applied later" />);
+    expect(box()).toHaveValue("");
+    expect(sendTurn).not.toHaveBeenCalled();
+  });
+
+  it("applies a different valid context later, only while the box is empty", () => {
+    const { rerender } = render(<ChatPanel initialDraft="First context" />);
+    expect(box()).toHaveValue("First context");
+    type("");
+    rerender(<ChatPanel initialDraft="Second context" />);
+    expect(box()).toHaveValue("Second context");
+    rerender(<ChatPanel initialDraft="Third context" />); // box has text now
+    expect(box()).toHaveValue("Second context");
+    expect(sendTurn).not.toHaveBeenCalled();
+  });
+
+  it("produces no draft when the context is invalid (an empty draft)", () => {
+    const { rerender } = render(<ChatPanel initialDraft="First context" />);
+    type("");
+    rerender(<ChatPanel initialDraft="" />);
+    expect(box()).toHaveValue("");
+  });
+
+  it("keeps the conversation when a context arrives", async () => {
+    const { rerender } = render(<ChatPanel />);
+    type("hello");
+    await press("Send message");
+    expect(await screen.findByText("Answer to: hello")).toBeInTheDocument();
+    rerender(<ChatPanel initialDraft="Do you have time for Flat repair?" />);
+    expect(screen.getByText("Answer to: hello")).toBeInTheDocument();
+    expect(box()).toHaveValue("Do you have time for Flat repair?");
+    expect(submissions()).toHaveLength(1); // nothing else was sent
   });
 
   it("never replaces a draft that was typed before: quick starts wait", () => {
