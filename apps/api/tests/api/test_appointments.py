@@ -1,4 +1,5 @@
 import logging
+import re
 import secrets
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -12,6 +13,8 @@ from voice_agent_api.domain.errors import StorageUnavailable
 from voice_agent_api.domain.models import Booking, Money
 from voice_agent_api.factory import create_app
 from voice_agent_api.infrastructure.in_memory import InMemoryAppointmentBook
+
+UUID_SHAPE = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 
 KEY = secrets.token_bytes(32)
 START = "2026-10-06T14:00:00Z"
@@ -324,8 +327,11 @@ def test_confirm_outcomes_are_audited_without_tokens_aliases_or_submitted_ids(
     assert (created.status_code, replayed.status_code, stale.status_code) == (201, 200, 409)
     lines = [r.getMessage() for r in caplog.records]
     appointment_id = created.json()["id"]
-    assert f"appointment_confirm outcome=created appointment_id={appointment_id}" in lines
-    assert f"appointment_confirm outcome=replayed appointment_id={appointment_id}" in lines
+    # Exactly the sanitized outcome events, in order: no identifier of any kind.
+    assert [line for line in lines if line.startswith("appointment_confirm")] == [
+        "appointment_confirm outcome=created",
+        "appointment_confirm outcome=replayed",
+    ]
     assert "domain_error code=proposal_stale method=POST route=/v1/appointments" in lines
     assert (
         "domain_error code=appointment_not_found method=GET route=/v1/appointments/{appointment_id}"
@@ -336,3 +342,34 @@ def test_confirm_outcomes_are_audited_without_tokens_aliases_or_submitted_ids(
     for secret in (token, stale_review["proposal_token"], review["customer_alias"]):
         assert secret not in everything
     assert "00000000-0000-0000-0000-000000000000" not in everything  # a submitted id, not logged
+    assert appointment_id not in everything  # the real appointment's id is not logged either
+    assert "appointment_id=" not in everything
+    assert not re.search(UUID_SHAPE, everything), "an identifier-shaped value was logged"
+    assert replayed.json()["id"] == appointment_id  # and the replay still answers the same row
+
+
+def test_an_unexpected_error_logs_the_route_template_never_the_appointment_id(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    class ExplodingBook(InMemoryAppointmentBook):
+        def get(self, appointment_id: Any) -> Any:
+            raise RuntimeError("boom")
+
+    catalog, _ = make_world()
+    app = create_app(
+        catalog, ExplodingBook(catalog, clock=lambda: NOW), lambda: NOW, signing_key=KEY
+    )
+    client = TestClient(app, raise_server_exceptions=False)
+    requested = "5b0c8e7a-1d3f-4a6b-9c2e-7f1a2b3c4d5e"
+
+    with caplog.at_level(
+        logging.DEBUG, logger="voice_agent_api"
+    ):  # the app's logs, not the client's
+        response = client.get(f"/v1/appointments/{requested}")
+
+    assert response.status_code == 500
+    assert response.json()["error"]["code"] == "internal_error"
+    messages = [r.getMessage() for r in caplog.records]
+    assert "Unhandled error on GET /v1/appointments/{appointment_id}" in messages
+    assert requested not in caplog.text
+    assert not re.search(UUID_SHAPE, caplog.text)

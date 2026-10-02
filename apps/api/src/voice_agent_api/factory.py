@@ -16,6 +16,7 @@ from voice_agent_api.api.dependencies import Clock
 from voice_agent_api.api.errors import register_error_handlers
 from voice_agent_api.api.proposal_tokens import ProposalTokenCodec
 from voice_agent_api.api.routes import router
+from voice_agent_api.api.speech_routes import router as speech_router
 from voice_agent_api.config import (
     MIN_SIGNING_KEY_BYTES,
     Settings,
@@ -23,6 +24,9 @@ from voice_agent_api.config import (
 )
 from voice_agent_api.domain.ports import AppointmentBook, BusinessCatalog
 from voice_agent_api.infrastructure.seed import build_seed
+from voice_agent_api.speech.bounded import SpeechService
+from voice_agent_api.speech.limits import SpeechLimits
+from voice_agent_api.speech.providers import build_speech_to_text
 
 
 class Lifecycle(Protocol):
@@ -46,17 +50,22 @@ def create_app(
     id_factory: Callable[[], UUID] = uuid4,
     resources: Sequence[Lifecycle] = (),
     agent: AgentService | None = None,
+    speech: SpeechService | None = None,
 ) -> FastAPI:
     """Build the app from explicit parts. Nothing here connects to anything.
 
     `agent` is None when no model provider is configured: `POST /v1/agent/turns` then answers 503
     `agent_unavailable` and everything else works as before. A given agent is opened and closed
-    with the app's lifespan, like `resources`."""
+    with the app's lifespan, like `resources`. `speech` works the same way: None means
+    `POST /v1/speech/transcriptions` answers 503 `speech_unavailable`."""
 
-    # The agent owns a call pool that must be closed at shutdown, so it is always managed here.
+    # The agent and the speech service own call pools that must be closed at shutdown, so they
+    # are always managed here.
     managed: list[Lifecycle] = [*resources]
     if agent is not None and agent not in managed:
         managed.append(agent)
+    if speech is not None and speech not in managed:
+        managed.append(speech)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -87,8 +96,10 @@ def create_app(
     app.state.token_codec = ProposalTokenCodec(key)
     app.state.id_factory = id_factory
     app.state.agent = agent
+    app.state.speech = speech
     register_error_handlers(app)
     app.include_router(router)
+    app.include_router(speech_router)
     return app
 
 
@@ -112,6 +123,15 @@ def build_agent(
     )
 
 
+def build_speech(settings: Settings) -> SpeechService | None:
+    """The speech service for the configured provider, or None when it is disabled (the default).
+    Construction makes no network call."""
+    port = build_speech_to_text(settings)
+    if port is None:
+        return None
+    return SpeechService(port, SpeechLimits.from_settings(settings))
+
+
 def create_app_from_settings(settings: Settings) -> FastAPI:
     key = resolve_signing_key(settings)
     if settings.appointment_store == "postgres":
@@ -128,6 +148,7 @@ def create_app_from_settings(settings: Settings) -> FastAPI:
             signing_key=key,
             resources=(database,),
             agent=build_agent(settings, pg_catalog, pg_book, key),
+            speech=build_speech(settings),
         )
     catalog, appointments = build_seed(system_clock(), system_clock)
     return create_app(
@@ -136,4 +157,5 @@ def create_app_from_settings(settings: Settings) -> FastAPI:
         system_clock,
         signing_key=key,
         agent=build_agent(settings, catalog, appointments, key),
+        speech=build_speech(settings),
     )

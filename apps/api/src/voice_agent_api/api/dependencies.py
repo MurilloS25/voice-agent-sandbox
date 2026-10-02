@@ -11,6 +11,7 @@ from fastapi import Depends, Request
 from voice_agent_api.agent.orchestrator import AgentService
 from voice_agent_api.api.proposal_tokens import ProposalTokenCodec
 from voice_agent_api.domain.ports import AppointmentBook, BusinessCatalog
+from voice_agent_api.speech.bounded import SpeechService
 
 Clock = Callable[[], datetime]
 IdFactory = Callable[[], UUID]
@@ -41,7 +42,13 @@ def get_agent(request: Request) -> AgentService | None:
     return cast(AgentService | None, request.app.state.agent)
 
 
+def get_speech(request: Request) -> SpeechService | None:
+    """None when no speech provider is configured: the route answers 503 `speech_unavailable`."""
+    return cast(SpeechService | None, request.app.state.speech)
+
+
 AgentDep = Annotated[AgentService | None, Depends(get_agent)]
+SpeechDep = Annotated[SpeechService | None, Depends(get_speech)]
 CatalogDep = Annotated[BusinessCatalog, Depends(get_catalog)]
 AppointmentsDep = Annotated[AppointmentBook, Depends(get_appointments)]
 ClockDep = Annotated[Clock, Depends(get_clock)]

@@ -21,6 +21,7 @@ from fastapi.routing import APIRoute
 from tests.support import NOW, SLOT_START, make_world
 from voice_agent_api.api.proposal_tokens import ProposalTokenCodec
 from voice_agent_api.api.routes import router
+from voice_agent_api.api.speech_routes import router as speech_router
 from voice_agent_api.domain.commands import propose_appointment
 from voice_agent_api.domain.models import (
     Appointment,
@@ -185,6 +186,59 @@ def test_route_and_dependency_modules_define_no_async_functions() -> None:
         tree = ast.parse((SRC / name).read_text(encoding="utf-8"))
         offenders = [n.name for n in ast.walk(tree) if isinstance(n, ast.AsyncFunctionDef)]
         assert not offenders, f"{name} defines async functions: {offenders}"
+
+
+SPEECH_PATH = "/v1/speech/transcriptions"
+
+
+def test_the_speech_route_is_the_only_async_route_and_everything_it_depends_on_is_synchronous() -> (
+    None
+):
+    # The speech route is async because `request.stream()` is. It must stay the only one: every
+    # route that reaches a blocking port is a plain `def` run in the worker threadpool.
+    speech_routes = [r for r in speech_router.routes if isinstance(r, APIRoute)]
+    assert [r.path for r in speech_routes] == [SPEECH_PATH]
+    async_paths = [
+        r.path for r in [*_api_routes(), *speech_routes] if inspect.iscoroutinefunction(r.endpoint)
+    ]
+    assert async_paths == [SPEECH_PATH]
+    for dependency in speech_routes[0].dependant.dependencies:
+        assert not inspect.iscoroutinefunction(dependency.call)
+
+
+def test_the_async_speech_route_module_contains_no_blocking_call() -> None:
+    tree = ast.parse((SRC / "api" / "speech_routes.py").read_text(encoding="utf-8"))
+    assert [n.name for n in ast.walk(tree) if isinstance(n, ast.AsyncFunctionDef)] == [
+        "create_transcription"
+    ]
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            func = node.func
+            if isinstance(func, ast.Name):
+                assert func.id != "open", "blocking file I/O on the event loop"
+            if isinstance(func, ast.Attribute):
+                # `time.sleep`, and the waits that block a thread, never run in this module: the
+                # provider call goes through `SpeechService`, which uses its own pool.
+                assert func.attr not in {"sleep", "result", "wait", "join", "acquire", "recv"}, (
+                    f"speech_routes.py calls .{func.attr}()"
+                )
+        if isinstance(node, ast.Import | ast.ImportFrom):
+            modules = (
+                [a.name for a in node.names]
+                if isinstance(node, ast.Import)
+                else [node.module or ""]
+            )
+            for module in modules:
+                assert module.split(".")[0] not in {
+                    "requests",
+                    "httpx",
+                    "socket",
+                    "subprocess",
+                    "tempfile",
+                    "groq",
+                    "langchain_groq",
+                }
 
 
 def test_lifespan_opens_and_closes_resources_off_the_event_loop() -> None:

@@ -38,6 +38,10 @@ All data is fictional. Scenarios use fixed dates relative to the test clock (202
 
 From `apps/api`: `python -m uv run pytest tests/evals`. Offline scenarios run in the default `pytest` and need no network or key.
 
+## Voice
+
+Voice does not change what the agent does, so these scenarios are unchanged and there are no voice scenarios: the transcript is plain text that the visitor sends like any other message. Voice behavior is covered offline by `apps/api/tests/speech` (limits, signatures, bounded execution, privacy, the fake and the Groq adapter over a mock transport) and by the web tests, with audio generated in memory from the standard library (a tone or silence, never a human voice). Voice was checked live exactly twice, as one-off checkpoints rather than an evaluation suite (C2 and C3 in [plan 0004](../docs/plans/0004-voice-experience.md)): synthetic audio only, with a budget of requests and audio-seconds kept apart from the token accounting below. There is no committed live voice harness, and repeating either checkpoint needs a new approval.
+
 ## Live runs
 
 `apps/api/tests/evals/test_live_scenarios.py` reuses `user` from these files (and `before` for scenario 11) against a real provider, once, with per-scenario criteria written in `tests/evals/live_support.py` instead of the scripted `expect`. It is opt-in and paced; see [docs/HARNESS.md](../docs/HARNESS.md). Results are recorded, sanitized, in ADR 0008. Scenario 8 (unknown service) must name real services; scenario 11 must acknowledge the taken time and create no review for it (the harness checkers are unchanged by the final attempt). Scenario 4 (open times) must produce no review, and scenario 6 must produce its review only in the turn after the visitor chose a time; any review in a conversation with no earlier successful search fails every scenario (`review_without_prior_offer`).

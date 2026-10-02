@@ -18,9 +18,12 @@ import {
   normalizeMessage,
 } from "@/lib/agent-message";
 import { newUuid } from "@/lib/uuid";
+import { useSpeechOutput } from "@/lib/voice/use-speech-output";
 
 import { ExecutionTimeline } from "./ExecutionTimeline";
 import { Transcript } from "./Transcript";
+import { SpokenReplies } from "./SpokenReplies";
+import { VoiceInput, type VoiceControl } from "./VoiceInput";
 
 type Phase =
   | { kind: "idle"; replied: boolean }
@@ -142,11 +145,48 @@ export function ChatPanel() {
   const [pending, setPending] = useState<Pending | null>(null);
   const [phase, setPhase] = useState<Phase>({ kind: "idle", replied: false });
   const [focusTurn, setFocusTurn] = useState<number | null>(null);
+  // Counts transcripts placed in the box, so the box takes focus after each one.
+  const [transcripts, setTranscripts] = useState(0);
+  // The merged transcript did not fit in 500 characters and its end was cut off.
+  const [shortened, setShortened] = useState(false);
+  const voice = useRef<VoiceControl>(null);
+
+  // Spoken replies. Both choices live in memory only and start off; refs mirror them for the
+  // async code that reads them after a turn comes back.
+  const { output: speech, snapshot: speechState } = useSpeechOutput();
+  const [readAloud, setReadAloud] = useState(false);
+  const [networkConsent, setNetworkConsent] = useState(false);
+  const [speechNote, setSpeechNote] = useState("");
+  const readAloudRef = useRef(false);
+  const consentRef = useRef(false);
 
   const inFlight = useRef(false);
   const noticeRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const timelineRef = useRef<HTMLDetailsElement>(null);
+
+  // Leaving the page or the component always stops speaking.
+  useEffect(() => {
+    const stopSpeaking = () => speech.stop();
+    window.addEventListener("pagehide", stopSpeaking);
+    return () => {
+      window.removeEventListener("pagehide", stopSpeaking);
+      speech.stop();
+    };
+  }, [speech]);
+
+  /** Reads one assistant reply aloud. Only its visible text is passed on, nothing else. */
+  function speakReply(id: string, text: string, automatic: boolean) {
+    const result = speech.speak(id, text, { allowNetwork: consentRef.current });
+    if (result === "needs_consent" && !automatic) {
+      setSpeechNote(
+        "Only a network voice is available. Agree to it under Synthesized voice first.",
+      );
+    } else if (result === "started") {
+      setSpeechNote("");
+    }
+    // A refusal (for example an autoplay block) is silent: Listen stays available.
+  }
 
   // The timeline is a side column from lg up and a collapsible section below it.
   useEffect(() => {
@@ -174,6 +214,28 @@ export function ChatPanel() {
     }
   }, [phase]);
 
+  // After a transcript is placed in the box the visitor can edit it: focus it, cursor at the end.
+  useEffect(() => {
+    if (transcripts === 0) return;
+    const box = textareaRef.current;
+    if (!box) return;
+    box.focus();
+    box.setSelectionRange(box.value.length, box.value.length);
+  }, [transcripts]);
+
+  /** The transcript joins what is already typed. It is never sent from here: only Send sends. */
+  function addTranscript(text: string) {
+    const merged = [draft.trim(), text.trim()]
+      .filter((part) => part.length > 0)
+      .join(" ");
+    setDraft(merged.slice(0, MAX_MESSAGE_LENGTH));
+    setShortened(merged.length > MAX_MESSAGE_LENGTH); // typed text is kept; the end is cut
+    setPhase((current) =>
+      current.kind === "invalid" ? { kind: "idle", replied: false } : current,
+    );
+    setTranscripts((count) => count + 1);
+  }
+
   async function run(submission: Pending) {
     if (inFlight.current) return;
     inFlight.current = true;
@@ -196,8 +258,17 @@ export function ChatPanel() {
         ]);
         setPending(null);
         setDraft("");
+        setShortened(false);
         setPhase({ kind: "idle", replied: true });
         setFocusTurn(outcome.turn.turn_index);
+        // Only after the visitor turned it on, and only for an assistant reply.
+        if (readAloudRef.current && outcome.turn.reply.source === "assistant") {
+          speakReply(
+            `current-${outcome.turn.turn_index}`,
+            outcome.turn.reply.text,
+            true,
+          );
+        }
         break;
       case "retry":
         setPending(submission);
@@ -236,6 +307,10 @@ export function ChatPanel() {
       setPhase({ kind: "invalid" });
       return;
     }
+    // Sending ends any recording or transcription that is still going: its text would arrive
+    // after the box was cleared.
+    voice.current?.cancel();
+    speech.stop(); // a new turn silences the previous reply
     // The conversation id is made once, on the first submission, and then kept.
     const id = conversationId ?? newUuid();
     if (conversationId === null) setConversationId(id);
@@ -254,6 +329,8 @@ export function ChatPanel() {
   }
 
   function startNewConversation() {
+    voice.current?.cancel();
+    speech.stop();
     if (turns.length > 0 || pending) {
       setEarlier((previous) => [
         ...previous,
@@ -365,8 +442,34 @@ export function ChatPanel() {
             liveReviewTurn={liveReviewTurn}
             focusTurn={focusTurn}
             idPrefix="current"
+            playback={
+              speechState.supported && speechState.choice.kind !== "none"
+                ? {
+                    speakingId: speechState.speakingId,
+                    onListen: (id, text) => speakReply(id, text, false),
+                    onStop: () => speech.stop(),
+                  }
+                : undefined
+            }
           />
         )}
+
+        <SpokenReplies
+          snapshot={speechState}
+          readAloud={readAloud}
+          onReadAloud={(on) => {
+            readAloudRef.current = on;
+            setReadAloud(on);
+            if (!on) speech.stop();
+          }}
+          networkConsent={networkConsent}
+          onConsent={() => {
+            consentRef.current = true;
+            setNetworkConsent(true);
+            setSpeechNote("");
+          }}
+          note={speechNote}
+        />
 
         {phase.kind === "retry" ? (
           <Notice title={RETRY_COPY[phase.reason].title} noticeRef={noticeRef}>
@@ -450,6 +553,7 @@ export function ChatPanel() {
               readOnly={sending}
               onChange={(event) => {
                 setDraft(event.target.value);
+                setShortened(false);
                 if (phase.kind === "invalid") {
                   setPhase({ kind: "idle", replied: false });
                 }
@@ -466,6 +570,12 @@ export function ChatPanel() {
             <p id="message-count" className="text-sm">
               {draft.length} of {MAX_MESSAGE_LENGTH} characters
             </p>
+            {shortened ? (
+              <p role="status" className="text-sm font-bold">
+                The transcript was shortened to fit {MAX_MESSAGE_LENGTH}{" "}
+                characters. Check the end of your message before sending.
+              </p>
+            ) : null}
             {phase.kind === "invalid" ? (
               <div
                 role="alert"
@@ -476,6 +586,12 @@ export function ChatPanel() {
                 Write a message of 1 to {MAX_MESSAGE_LENGTH} characters.
               </div>
             ) : null}
+            <VoiceInput
+              controlRef={voice}
+              onRecordingStart={() => speech.stop()}
+              onTranscript={addTranscript}
+              disabled={sending || phase.kind === "unavailable"}
+            />
             <div className="mt-3 flex flex-wrap items-center gap-4">
               <button
                 type="submit"

@@ -238,12 +238,9 @@ def confirm_appointment_route(
     appointment, created = confirm_appointment(appointments, proposal, clock())
     if not created:
         response.status_code = 200
-    # Audit trail: ids and outcome only. Never the token, the alias or any submitted value.
-    logger.info(
-        "appointment_confirm outcome=%s appointment_id=%s",
-        "created" if created else "replayed",
-        appointment.id,
-    )
+    # Audit trail: the sanitized outcome only. Never an identifier (the appointment's included),
+    # the token, the alias or any submitted value (ADR 0007, "Identifier taxonomy").
+    logger.info("appointment_confirm outcome=%s", "created" if created else "replayed")
     return _appointment_response(appointment)
 
 

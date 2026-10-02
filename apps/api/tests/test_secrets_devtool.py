@@ -127,6 +127,12 @@ def test_env_example_holds_placeholders_only() -> None:
         "AGENT_MAX_OUTPUT_TOKENS": "512",
         "AGENT_REASONING_EFFORT": "low",
         "AGENT_REASONING_CONTROL": "include_reasoning",
+        "APP_ENV": "production",
+        "SPEECH_PROVIDER": "disabled",
+        "SPEECH_TIMEOUT_S": "6",
+        "SPEECH_READ_TIMEOUT_S": "3",
+        "SPEECH_MAX_AUDIO_BYTES": "524288",
+        "SPEECH_MAX_CONCURRENT": "2",
     }
     for name, value in example.items():
         if name in non_secret_defaults:
@@ -207,3 +213,101 @@ def test_env_example_with_the_provider_selected_is_rejected_by_name() -> None:
     selected = settings.model_copy(update={"agent_provider": "groq"})
     with pytest.raises(ConfigError):
         validate_settings(selected)
+
+
+SPEECH_ENV = (
+    "APP_ENV",
+    "SPEECH_PROVIDER",
+    "SPEECH_MODEL",
+    "SPEECH_TIMEOUT_S",
+    "SPEECH_READ_TIMEOUT_S",
+    "SPEECH_MAX_AUDIO_BYTES",
+    "SPEECH_MAX_CONCURRENT",
+    "GROQ_API_KEY",
+)
+
+
+@pytest.fixture
+def no_speech_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in SPEECH_ENV:
+        monkeypatch.delenv(name, raising=False)
+
+
+def test_generate_never_writes_provider_or_speech_values(
+    tmp_path: Path, no_speech_env: None
+) -> None:
+    env = tmp_path / ".env"
+    devtool.main(["--env-file", str(env), "generate"])
+    written = values(env)
+    assert not set(written) & set(SPEECH_ENV)
+    assert not any(name.startswith(("SPEECH_", "GROQ_")) for name in written)
+
+
+def test_check_needs_no_speech_setting_while_it_is_disabled(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], no_speech_env: None
+) -> None:
+    env = filled_env(tmp_path, "SPEECH_MODEL=CHANGE_ME\n")
+    capsys.readouterr()
+    assert devtool.main(["--env-file", str(env), "check"]) == 0
+    out = capsys.readouterr().out
+    assert "SPEECH_PROVIDER=disabled" in out and "FAIL" not in out
+
+
+def test_check_fails_closed_for_the_fake_without_a_development_environment(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+    no_speech_env: None,
+) -> None:
+    env = filled_env(tmp_path, "SPEECH_PROVIDER=fake\n")
+    capsys.readouterr()
+    assert devtool.main(["--env-file", str(env), "check"]) == 1
+    assert "APP_ENV" in " ".join(r.getMessage() for r in caplog.records)
+    assert "could not be loaded" in capsys.readouterr().out
+
+
+def test_check_passes_the_fake_in_development_and_prints_names_only(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], no_speech_env: None
+) -> None:
+    env = filled_env(tmp_path, "SPEECH_PROVIDER=fake\nAPP_ENV=development\n")
+    capsys.readouterr()
+    assert devtool.main(["--env-file", str(env), "check"]) == 0
+    out = capsys.readouterr().out
+    assert "ok  : APP_ENV" in out and "development" not in out
+
+
+def test_check_fails_closed_for_groq_speech_without_a_model(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+    no_speech_env: None,
+) -> None:
+    fake = "fake-offline-credential-for-tests-0001"
+    env = filled_env(tmp_path, f"SPEECH_PROVIDER=groq\nGROQ_API_KEY={fake}\n")
+    capsys.readouterr()
+    assert devtool.main(["--env-file", str(env), "check"]) == 1
+    logged = " ".join(r.getMessage() for r in caplog.records)
+    assert "SPEECH_MODEL" in logged and fake not in logged
+
+
+def test_check_passes_groq_speech_and_never_prints_the_key_or_model(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], no_speech_env: None
+) -> None:
+    fake = "fake-offline-credential-for-tests-0001"
+    env = filled_env(
+        tmp_path,
+        f"SPEECH_PROVIDER=groq\nGROQ_API_KEY={fake}\nSPEECH_MODEL=some/whisper-model\n",
+    )
+    capsys.readouterr()
+    assert devtool.main(["--env-file", str(env), "check"]) == 0
+    out = capsys.readouterr().out
+    assert "ok  : GROQ_API_KEY" in out and "ok  : SPEECH_MODEL" in out
+    assert fake not in out and "some/whisper-model" not in out
+
+
+def test_env_example_with_speech_selected_is_rejected_by_name(no_speech_env: None) -> None:
+    settings = load_settings(env_file=str(API_ROOT / ".env.example"))
+    assert settings.speech_provider == "disabled" and settings.app_env == "production"
+    for provider in ("fake", "groq"):
+        with pytest.raises(ConfigError):
+            validate_settings(settings.model_copy(update={"speech_provider": provider}))

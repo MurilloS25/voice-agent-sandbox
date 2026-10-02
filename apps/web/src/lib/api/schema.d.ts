@@ -150,6 +150,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v1/speech/transcriptions": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Create Transcription
+     * @description Transcribe one short recording. It does not call the assistant and stores nothing.
+     */
+    post: operations["create_transcription_v1_speech_transcriptions_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -726,6 +746,20 @@ export interface components {
       /** Tool */
       tool: string;
     };
+    /** TranscriptionResponse */
+    TranscriptionResponse: {
+      /**
+       * Language
+       * @description Transcription is English only for now.
+       * @constant
+       */
+      language: "en";
+      /**
+       * Text
+       * @description Machine-transcribed text. The visitor can edit it before sending it.
+       */
+      text: string;
+    };
     /** TurnErrorEvent */
     TurnErrorEvent: {
       /**
@@ -1160,6 +1194,102 @@ export interface operations {
       };
       /** @description Storage unavailable. */
       503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  create_transcription_v1_speech_transcriptions_post: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description What the client says the recording lasts. Not verified by the server: diagnostics only. */
+        "X-Audio-Duration-Ms"?: number | null;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    /** @description The raw audio bytes of one short recording (at most 512 KB). */
+    requestBody: {
+      content: {
+        "audio/mp4": string;
+        "audio/ogg": string;
+        "audio/wav": string;
+        "audio/webm": string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TranscriptionResponse"];
+        };
+      };
+      /** @description audio_too_large: more than 512 KB. */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description audio_unsupported: type not allowed, or the signature does not match it. */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description audio_invalid, no_speech or validation_error. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description speech_busy: every transcription slot is taken. */
+      429: {
+        headers: {
+          /** @description Seconds to wait before retrying. */
+          "Retry-After"?: number;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description transcription_failed. */
+      502: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description speech_unavailable: no provider is configured. */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description transcription_timeout. */
+      504: {
         headers: {
           [name: string]: unknown;
         };
