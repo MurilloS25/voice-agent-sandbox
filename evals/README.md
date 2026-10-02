@@ -40,7 +40,7 @@ From `apps/api`: `python -m uv run pytest tests/evals`. Offline scenarios run in
 
 ## Voice
 
-Voice does not change what the agent does, so these scenarios are unchanged and there are no voice scenarios: the transcript is plain text that the visitor sends like any other message. Voice behavior is covered offline by `apps/api/tests/speech` (limits, signatures, bounded execution, privacy, the fake and the Groq adapter over a mock transport) and by the web tests, with audio generated in memory from the standard library (a tone or silence, never a human voice). A live voice evaluation (checkpoints C2 and C3 in [plan 0004](../docs/plans/0004-voice-experience.md)) is not implemented and has not been run; it would need its own approval, synthetic audio only, and its own budget of requests and audio-seconds, kept apart from the token accounting below.
+Voice does not change what the agent does, so these scenarios are unchanged and there are no voice scenarios: the transcript is plain text that the visitor sends like any other message. Voice behavior is covered offline by `apps/api/tests/speech` (limits, signatures, bounded execution, privacy, the fake and the Groq adapter over a mock transport) and by the web tests, with audio generated in memory from the standard library (a tone or silence, never a human voice). Voice was checked live exactly twice, as one-off checkpoints rather than an evaluation suite (C2 and C3 in [plan 0004](../docs/plans/0004-voice-experience.md)): synthetic audio only, with a budget of requests and audio-seconds kept apart from the token accounting below. There is no committed live voice harness, and repeating either checkpoint needs a new approval.
 
 ## Live runs
 

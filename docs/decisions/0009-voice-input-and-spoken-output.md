@@ -1,6 +1,6 @@
 # Voice is an input and output layer around the text agent: bounded raw-audio transcription, browser synthesis
 
-- Status: accepted for the offline scope (plan 0004, phases 4A to 4E, complete). Behavior against the real provider, a real microphone and real speech synthesis voices is **unverified**: checkpoints C1 to C3 have not been run, and the browser rehearsal used a fake microphone and a stub `speechSynthesis`. Results are in the plan's closeout.
+- Status: accepted. Implemented and verified offline (plan 0004, phases 4A to 4E), then checked once against the real Groq services with synthetic audio (checkpoints C2 and C3, 2026-10-01; sanitized results in the plan's closeout). Still **unverified**: a real microphone (the browser run used a fake capture device fed by a synthetic clip), real speech synthesis voices (a local stand-in was injected), other browsers and devices, and Zero Data Retention itself, which the operator confirmed and the repository cannot verify.
 - Date: 2026-10-01
 
 ## Context
@@ -33,7 +33,9 @@ Milestone 4 adds voice to the existing text agent ([ADR 0007](0007-agent-orchest
 
 - The agent and the booking path are untouched; voice only fills the message box. A transcript is machine output until the visitor sends it.
 - Audio exists only in browser memory until upload and in API memory for one request. The audio is sent to the transcription provider; Groq documented on 2026-10-01 that audio endpoints keep no data by default except for troubleshooting or abuse (up to 30 days) and that Zero Data Retention can be turned on per organisation. Whether it is on is the operator's setting and cannot be verified from this repository; C1 is where it is confirmed.
-- Provider limits (a 10 s minimum billed per request, 20 requests per minute on the free tier at that date) are documented, not relied on; the model is configuration and is re-verified at C1.
+- Provider limits (a 10 s minimum billed per request, 20 requests per minute on the free tier at that date) are documented, not relied on; the model is configuration and was re-verified from the official pages at C1. The live checkpoints confirmed the adapter's real behavior once: the pinned endpoint, `language="en"`, one request with no retry, and a fixed public result.
+- The route handler reads and buffers up to 512 KB per connection before the API's own slot limit can answer 429, so many open connections cost memory on the web tier; that amplification, like the lack of a rate limit, is covered by the Milestone 5 work.
+- A logging fix came out of the live checkpoint: the confirmation audit line logged the appointment id and the unhandled-error line logged the concrete request path, both contrary to [ADR 0007](0007-agent-orchestration-and-tool-boundary.md). They now log only the outcome and the route template (commit `00ad24f`, validated offline against the real created and replayed log lines; the live run was not repeated). Two gaps remain and are documented rather than fixed: uvicorn's access log prints request paths, including `GET /v1/appointments/<id>`, so a deployment must disable or redact it (Milestone 5); and the unhandled-error traceback is not redacted.
 - Until Milestone 5 there is no public rate limit or spend cap. Worker threads are not daemons, so a hung provider call can delay process exit until its own timeout.
 - English only. Spanish, hold-to-talk as an addition, a browser-recognition fallback and server-side text-to-speech are deferred.
 
