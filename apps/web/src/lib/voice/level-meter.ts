@@ -45,7 +45,7 @@ export function barLevels(bins: Uint8Array, out: number[] = []): number[] {
     );
     let sum = 0;
     for (let j = start; j < end; j += 1) sum += bins[j] ?? 0;
-    out[i] = Math.min(1, sum / (end - start) / 200);
+    out[i] = Math.min(1, sum / (end - start) / 150);
   }
   out.length = BAR_COUNT;
   return out;

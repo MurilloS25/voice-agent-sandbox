@@ -73,8 +73,8 @@ const subscribeMotion = (notify: () => void) => {
 const prefersReducedMotion = () =>
   window.matchMedia?.(REDUCED)?.matches ?? false;
 
-const BAR_REST = 6;
-const BAR_MAX = 26;
+const BAR_REST = 7;
+const BAR_MAX = 30;
 
 /**
  * The centre of the voice stage, drawn as one SVG so every state can move in its own way:

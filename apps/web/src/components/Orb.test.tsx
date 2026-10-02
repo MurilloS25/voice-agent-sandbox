@@ -115,8 +115,8 @@ describe("listening: the bars follow the real volume", () => {
     act(() => frames?.tick());
     const loud = height();
 
-    expect(Math.max(...quiet)).toBe(6);
-    expect(Math.max(...loud)).toBeGreaterThan(15);
+    expect(Math.max(...quiet)).toBe(7);
+    expect(Math.max(...loud)).toBeGreaterThan(18);
     // Reactive bars are driven by the signal, not by the idle animation.
     expect(container.querySelector(".orb-bar-idle")).toBeNull();
   });
@@ -194,7 +194,7 @@ describe("listening: the bars follow the real volume", () => {
     act(() => frames?.tick());
     const nodes = bars(container);
     rerender(<Orb stage="listening" stream={null} />); // the stream went away
-    expect(nodes.every((bar) => bar.getAttribute("height") === "6")).toBe(true);
+    expect(nodes.every((bar) => bar.getAttribute("height") === "7")).toBe(true);
   });
 });
 
