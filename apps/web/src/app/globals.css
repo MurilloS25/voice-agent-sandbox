@@ -11,6 +11,8 @@
   --color-celeste: #8fd3ce;
   --color-hivis: #d7e34a;
   --color-rust: #a8391f;
+  /* Warm paper for the assistant surfaces; bottle on cream is 12:1. */
+  --color-cream: #fbf8f1;
 
   --font-display: var(--font-display-loaded), "Arial Narrow", sans-serif;
   --font-sans: var(--font-body-loaded), system-ui, sans-serif;
@@ -64,12 +66,33 @@ body {
 }
 
 /*
- * On a wide and tall enough window the assistant's message box sticks to the bottom. Keeping focus and
- * anchors clear of it takes some bottom scroll padding. The query is in rem, so enlarged text
- * switches both off together.
+ * The voice orb. Motion is decoration only (state is always also written as text) and runs only
+ * when the visitor has not asked for reduced motion.
  */
-@media (min-width: 48rem) and (min-height: 44rem) {
-  html {
-    scroll-padding-bottom: calc(var(--composer-height, 16rem) + 1rem);
+@keyframes orb-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.55;
+  }
+  50% {
+    transform: scale(1.12);
+    opacity: 0.2;
+  }
+}
+
+@keyframes orb-orbit {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .orb-breathe {
+    animation: orb-breathe 2.4s ease-in-out infinite;
+  }
+
+  .orb-orbit {
+    animation: orb-orbit 3.2s linear infinite;
   }
 }

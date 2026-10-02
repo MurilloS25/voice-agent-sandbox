@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import type { KeyboardEvent, ReactNode, RefObject } from "react";
+import type { KeyboardEvent, MouseEvent, ReactNode, RefObject } from "react";
 
 import { sendTurn } from "@/app/assistant/actions";
 import type {
@@ -19,13 +19,23 @@ import {
 } from "@/lib/agent-message";
 import { draftFor } from "@/lib/assistant-link";
 import { newUuid } from "@/lib/uuid";
+import {
+  PREVIEW_SPEECH_ID,
+  PREVIEW_TEXT,
+  WELCOME_SPEECH_ID,
+} from "@/lib/voice/stage";
 import { useSpeechOutput } from "@/lib/voice/use-speech-output";
 
-import { AssistantWelcome } from "./AssistantWelcome";
+import { AssistantWelcome, WELCOME_TEXT } from "./AssistantWelcome";
 import { ExecutionTimeline } from "./ExecutionTimeline";
-import { Transcript, type ReviewAgain } from "./Transcript";
-import { SpokenReplies } from "./SpokenReplies";
+import { SecondaryPanel } from "./SecondaryPanel";
+import { ReviewBlock, Transcript, type ReviewAgain } from "./Transcript";
 import { VoiceInput, type VoiceControl } from "./VoiceInput";
+import { VoiceSettings } from "./VoiceSettings";
+import { VoiceStage } from "./VoiceStage";
+
+export type AssistantMode = "voice" | "text";
+type PanelKind = "transcript" | "timeline" | "settings";
 
 type Phase =
   | { kind: "idle"; replied: boolean }
@@ -80,9 +90,9 @@ const RETRY_COPY = {
 } as const;
 
 const buttonClass =
-  "min-h-12 bg-bottle px-6 py-2 text-lg font-bold [overflow-wrap:anywhere] text-primer hover:bg-moss disabled:opacity-60";
+  "min-h-12 rounded-full bg-bottle px-6 py-2 text-lg font-bold [overflow-wrap:anywhere] text-cream hover:bg-moss disabled:opacity-60";
 const secondaryButtonClass =
-  "min-h-12 border-2 border-bottle bg-white px-4 py-2 font-bold [overflow-wrap:anywhere] hover:bg-hivis";
+  "min-h-12 rounded-full border border-bottle/40 bg-white px-5 py-2 font-bold [overflow-wrap:anywhere] hover:bg-celeste/40";
 const linkClass = "font-bold underline underline-offset-4";
 
 function Notice({
@@ -99,7 +109,7 @@ function Notice({
       ref={noticeRef}
       role="alert"
       tabIndex={-1}
-      className="max-w-prose border-2 border-l-8 border-rust bg-white p-4"
+      className="max-w-prose rounded-2xl border-l-8 border-rust bg-white p-4 shadow-[0_2px_14px_-6px_rgb(15_59_54/0.35)]"
     >
       <p className="text-lg font-bold [overflow-wrap:anywhere] text-rust">
         {title}
@@ -135,7 +145,16 @@ function RetryButton({
   );
 }
 
-export function ChatPanel({ initialDraft = "" }: { initialDraft?: string }) {
+const toolbarButton =
+  "inline-flex min-h-12 items-center rounded-full px-4 py-2 text-sm font-bold [overflow-wrap:anywhere] hover:bg-celeste/40";
+
+export function ChatPanel({
+  initialDraft = "",
+  initialMode = "voice",
+}: {
+  initialDraft?: string;
+  initialMode?: AssistantMode;
+}) {
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [turns, setTurns] = useState<Turn[]>([]);
   const [earlier, setEarlier] = useState<Conversation[]>([]);
@@ -154,6 +173,17 @@ export function ChatPanel({ initialDraft = "" }: { initialDraft?: string }) {
     }
   }
 
+  const [mode, setMode] = useState<AssistantMode>(initialMode);
+  const [panel, setPanel] = useState<PanelKind | null>(null);
+  // The visitor started the voice session. It lives in memory only: a reload starts it again.
+  const [sessionActive, setSessionActive] = useState(false);
+  // A transcript is waiting in the box for the visitor to check, edit and send (or discard).
+  const [transcriptPending, setTranscriptPending] = useState(false);
+  // A reply that automatic reading could not start, so the stage can offer to read it.
+  const [unheard, setUnheard] = useState<{ id: string; text: string } | null>(
+    null,
+  );
+
   const [pending, setPending] = useState<Pending | null>(null);
   const [phase, setPhase] = useState<Phase>({ kind: "idle", replied: false });
   const [focusTurn, setFocusTurn] = useState<number | null>(null);
@@ -162,24 +192,28 @@ export function ChatPanel({ initialDraft = "" }: { initialDraft?: string }) {
   // The merged transcript did not fit in 500 characters and its end was cut off.
   const [shortened, setShortened] = useState(false);
   const voice = useRef<VoiceControl>(null);
-  const composerRef = useRef<HTMLFormElement>(null);
-  // A transcript is in the box and has not been sent yet; and which text it was.
+  // A transcript is in the box and has not been sent yet (text composer); and which text it was.
   const [reviewing, setReviewing] = useState(false);
   const lastTranscript = useRef("");
 
-  // Spoken replies. Both choices live in memory only and start off; refs mirror them for the
-  // async code that reads them after a turn comes back.
+  // Spoken replies. The network-voice agreement lives in memory only; refs mirror what the async
+  // code reads after a turn comes back.
   const { output: speech, snapshot: speechState } = useSpeechOutput();
-  const [readAloud, setReadAloud] = useState(false);
   const [networkConsent, setNetworkConsent] = useState(false);
   const [speechNote, setSpeechNote] = useState("");
-  const readAloudRef = useRef(false);
   const consentRef = useRef(false);
+  // Replies are read automatically only while the voice session is on and Voice is showing.
+  const autoReadRef = useRef(false);
+  useEffect(() => {
+    autoReadRef.current = mode === "voice" && sessionActive;
+  }, [mode, sessionActive]);
 
   const inFlight = useRef(false);
   const noticeRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const timelineRef = useRef<HTMLDetailsElement>(null);
+  const openerRef = useRef<HTMLElement | null>(null);
+  const previousPanel = useRef<PanelKind | null>(null);
+  const logRef = useRef<HTMLDivElement>(null);
 
   // Leaving the page or the component always stops speaking.
   useEffect(() => {
@@ -191,49 +225,39 @@ export function ChatPanel({ initialDraft = "" }: { initialDraft?: string }) {
     };
   }, [speech]);
 
-  /** Reads one assistant reply aloud. Only its visible text is passed on, nothing else. */
+  // Closing a panel gives focus back to the control that opened it.
+  useEffect(() => {
+    if (previousPanel.current !== null && panel === null) {
+      openerRef.current?.focus();
+    }
+    previousPanel.current = panel;
+  }, [panel]);
+
+  /**
+   * Reads one assistant reply aloud. Only its visible text is passed on, nothing else. An
+   * automatic reading counts as done only once the browser reports that it started; a refusal
+   * or a failure leaves the reply unread and the stage offers to read it.
+   */
   function speakReply(id: string, text: string, automatic: boolean) {
-    const result = speech.speak(id, text, { allowNetwork: consentRef.current });
+    const result = speech.speak(id, text, {
+      allowNetwork: consentRef.current,
+      onStart: () => {
+        setUnheard((current) => (current?.id === id ? null : current));
+      },
+      onError: () => {
+        if (automatic) setUnheard({ id, text });
+      },
+    });
     if (result === "needs_consent" && !automatic) {
       setSpeechNote(
-        "Only a network voice is available. Agree to it under Synthesized voice first.",
+        "Only a network voice is available. Agree to it in Voice settings first.",
       );
     } else if (result === "started") {
       setSpeechNote("");
     }
-    // A refusal (for example an autoplay block) is silent: Listen stays available.
+    if (automatic && result !== "started") setUnheard({ id, text });
+    // A refusal (for example an autoplay block) is silent: Listen and "Read reply aloud" stay.
   }
-
-  // The real height of the message box, so focus and anchors never land under it when it sticks.
-  useEffect(() => {
-    const form = composerRef.current;
-    if (!form || typeof ResizeObserver === "undefined") return;
-    const root = document.documentElement;
-    const observer = new ResizeObserver(() => {
-      root.style.setProperty(
-        "--composer-height",
-        `${form.getBoundingClientRect().height}px`,
-      );
-    });
-    observer.observe(form);
-    return () => {
-      observer.disconnect();
-      root.style.removeProperty("--composer-height");
-    };
-  });
-
-  // The timeline is a side column from lg up and a collapsible section below it.
-  useEffect(() => {
-    const details = timelineRef.current;
-    const query = window.matchMedia?.("(min-width: 1024px)");
-    if (!details || !query) return;
-    const sync = () => {
-      details.open = query.matches;
-    };
-    sync();
-    query.addEventListener("change", sync);
-    return () => query.removeEventListener("change", sync);
-  }, []);
 
   // Problems take focus so a screen reader hears them. Nothing takes focus on first render.
   useEffect(() => {
@@ -250,21 +274,28 @@ export function ChatPanel({ initialDraft = "" }: { initialDraft?: string }) {
 
   // After a transcript is placed in the box the visitor can edit it: focus it, cursor at the end.
   useEffect(() => {
-    if (transcripts === 0) return;
+    if (transcripts === 0 || mode !== "text") return;
     const box = textareaRef.current;
     if (!box) return;
     box.focus();
     box.setSelectionRange(box.value.length, box.value.length);
-  }, [transcripts]);
+  }, [transcripts, mode]);
 
   // A context that arrived while the page was open puts the cursor in the prepared draft.
   useEffect(() => {
-    if (contextFocus === 0) return;
+    if (contextFocus === 0 || mode !== "text") return;
     const box = textareaRef.current;
     if (!box) return;
     box.focus();
     box.setSelectionRange(box.value.length, box.value.length);
-  }, [contextFocus]);
+  }, [contextFocus, mode]);
+
+  // A sent message must be in view in the conversation, whatever the visitor scrolled to.
+  const showingSending = phase.kind === "sending";
+  useEffect(() => {
+    const log = logRef.current;
+    if (showingSending && log) log.scrollTop = log.scrollHeight;
+  }, [showingSending]);
 
   /**
    * A click on "Review again" is a new request each time, even for the same service and day. It
@@ -292,30 +323,55 @@ export function ChatPanel({ initialDraft = "" }: { initialDraft?: string }) {
     textareaRef.current?.focus();
   }
 
-  /** Recording again replaces the transcript from last time, if it was left as it was. */
+  /** A new recording silences the assistant. */
   function onRecordingStart() {
     speech.stop();
   }
 
   /** The transcript joins what is already typed. It is never sent from here: only Send sends. */
   function addTranscript(text: string) {
-    // Recording again replaces the last transcript if it was left as it was. It is removed only
-    // now that a new one has arrived, so a failed or cancelled recording loses nothing.
-    const previous = lastTranscript.current;
-    let base = draft.trim();
-    if (previous && base.endsWith(previous)) {
-      base = base.slice(0, base.length - previous.length).trim();
+    const heard = text.trim();
+    // In the voice review the transcript is the whole message: Record again replaces it, edits
+    // included. It is replaced only now that a new one has arrived, so a failed or cancelled
+    // recording loses nothing.
+    if (mode === "voice" && transcriptPending) {
+      lastTranscript.current = heard;
+      setDraft(heard.slice(0, MAX_MESSAGE_LENGTH));
+      setShortened(heard.length > MAX_MESSAGE_LENGTH);
+    } else {
+      // In the text composer, recording again replaces the last transcript if it was left as it
+      // was, and keeps what the visitor typed.
+      const previous = lastTranscript.current;
+      let base = draft.trim();
+      if (previous && base.endsWith(previous)) {
+        base = base.slice(0, base.length - previous.length).trim();
+      }
+      lastTranscript.current = heard;
+      const merged = [base, heard].filter((part) => part.length > 0).join(" ");
+      setDraft(merged.slice(0, MAX_MESSAGE_LENGTH));
+      setShortened(merged.length > MAX_MESSAGE_LENGTH); // typed text is kept; the end is cut
     }
-    lastTranscript.current = text.trim();
-    const merged = [base, text.trim()]
-      .filter((part) => part.length > 0)
-      .join(" ");
-    setDraft(merged.slice(0, MAX_MESSAGE_LENGTH));
-    setShortened(merged.length > MAX_MESSAGE_LENGTH); // typed text is kept; the end is cut
+    setTranscriptPending(true);
     setPhase((current) =>
       current.kind === "invalid" ? { kind: "idle", replied: false } : current,
     );
     setTranscripts((count) => count + 1);
+  }
+
+  /** Throws away the transcript that is waiting (and only it: text typed before stays). */
+  function discardTranscript() {
+    const previous = lastTranscript.current;
+    if (previous) {
+      setDraft((current) => {
+        const text = current.trim();
+        return text.endsWith(previous)
+          ? text.slice(0, text.length - previous.length).trim()
+          : current;
+      });
+    }
+    lastTranscript.current = "";
+    setTranscriptPending(false);
+    setShortened(false);
   }
 
   async function run(submission: Pending) {
@@ -343,8 +399,8 @@ export function ChatPanel({ initialDraft = "" }: { initialDraft?: string }) {
         setShortened(false);
         setPhase({ kind: "idle", replied: true });
         setFocusTurn(outcome.turn.turn_index);
-        // Only after the visitor turned it on, and only for an assistant reply.
-        if (readAloudRef.current && outcome.turn.reply.source === "assistant") {
+        // Only while the voice session is on, and only for an assistant reply that is new.
+        if (autoReadRef.current && outcome.turn.reply.source === "assistant") {
           speakReply(
             `current-${outcome.turn.turn_index}`,
             outcome.turn.reply.text,
@@ -394,6 +450,8 @@ export function ChatPanel({ initialDraft = "" }: { initialDraft?: string }) {
     // after the box was cleared.
     voice.current?.cancel();
     lastTranscript.current = "";
+    setTranscriptPending(false);
+    setUnheard(null);
     speech.stop(); // a new turn silences the previous reply
     // The conversation id is made once, on the first submission, and then kept.
     const id = conversationId ?? newUuid();
@@ -429,6 +487,9 @@ export function ChatPanel({ initialDraft = "" }: { initialDraft?: string }) {
     setConversationId(null);
     setTurns([]);
     setPending(null);
+    setUnheard(null);
+    setTranscriptPending(false);
+    lastTranscript.current = "";
     // A message that was never sent (the conversation was already full) is kept for the new one.
     if (pending || phase.kind !== "ended") setDraft("");
     setFocusTurn(null);
@@ -447,6 +508,59 @@ export function ChatPanel({ initialDraft = "" }: { initialDraft?: string }) {
     }
   }
 
+  // --- the voice session -------------------------------------------------------------------
+
+  /**
+   * Starts the voice session. It runs inside the visitor's click, so the browser lets the
+   * welcome play: the fixed local text is spoken from this gesture, with nothing awaited first.
+   * It is not a turn: no model call, no conversation, no counter, nothing in the history. It
+   * turns on automatic reading of replies that arrive from now on, and it never records.
+   */
+  function startSession() {
+    setSessionActive(true);
+    const result = speech.speak(WELCOME_SPEECH_ID, WELCOME_TEXT, {
+      allowNetwork: consentRef.current,
+    });
+    if (result === "needs_consent") {
+      setSpeechNote(
+        "Only a network voice is available, so the welcome and the replies are not read aloud until you agree to it.",
+      );
+    } else {
+      setSpeechNote("");
+    }
+  }
+
+  /** Ends the voice session: speech stops, automatic reading is off, the conversation stays. */
+  function endSession() {
+    speech.stop();
+    voice.current?.cancel();
+    discardTranscript();
+    setUnheard(null);
+    setSessionActive(false);
+  }
+
+  function chooseMode(next: AssistantMode) {
+    if (next === mode) return;
+    speech.stop(); // leaving one mode never leaves the other talking
+    setMode(next);
+    if (next === "text" && panel === "transcript") setPanel(null);
+  }
+
+  function togglePanel(kind: PanelKind, event: MouseEvent<HTMLElement>) {
+    if (panel === kind) {
+      setPanel(null);
+      return;
+    }
+    openerRef.current = event.currentTarget;
+    // Below the wide layout a panel takes the place of the stage, so a recording behind it
+    // would be unreachable: end it, and stop talking.
+    if (!window.matchMedia?.("(min-width: 1024px)").matches) {
+      voice.current?.cancel();
+      speech.stop();
+    }
+    setPanel(kind);
+  }
+
   const transcriptReady = reviewing && draft.trim() !== "";
   const ended = phase.kind === "ended";
   const sending = phase.kind === "sending";
@@ -460,9 +574,23 @@ export function ChatPanel({ initialDraft = "" }: { initialDraft?: string }) {
     ? null
     : ([...turns].reverse().find((t) => t.response.booking_review)?.response
         .turn_index ?? null);
+  const liveReview =
+    liveReviewTurn === null
+      ? null
+      : (turns.find((t) => t.response.turn_index === liveReviewTurn)?.response
+          .booking_review ?? null);
   const unsent =
     pending && !sending && phase.kind !== "idle" ? pending.message : null;
   const showSending = sending && pending ? pending.message : null;
+  const speechUsable =
+    speechState.supported && speechState.choice.kind !== "none";
+  const playback = speechUsable
+    ? {
+        speakingId: speechState.speakingId,
+        onListen: (id: string, text: string) => speakReply(id, text, false),
+        onStop: () => speech.stop(),
+      }
+    : undefined;
 
   const status =
     phase.kind === "sending"
@@ -471,277 +599,486 @@ export function ChatPanel({ initialDraft = "" }: { initialDraft?: string }) {
         ? "The assistant replied."
         : "";
 
-  return (
-    <div className="grid grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)] lg:items-start lg:gap-10">
-      <section
-        aria-labelledby="chat-heading"
-        className="min-w-0 border-2 border-bottle bg-white/70"
-      >
-        <h2 id="chat-heading" className="sr-only">
-          Conversation
-        </h2>
-
-        <SpokenReplies
-          snapshot={speechState}
-          readAloud={readAloud}
-          onReadAloud={(on) => {
-            readAloudRef.current = on;
-            setReadAloud(on);
-            if (!on) speech.stop();
-          }}
-          networkConsent={networkConsent}
-          onConsent={() => {
-            consentRef.current = true;
-            setNetworkConsent(true);
-            setSpeechNote("");
-          }}
-          note={speechNote}
-        />
-
-        <div className="space-y-6 p-4 sm:p-6">
-          {earlier.map((conversation, index) => (
-            <details key={index} className="border-l-4 border-moss pl-4">
-              <summary className="min-h-12 cursor-pointer py-2 font-bold [overflow-wrap:anywhere]">
-                Earlier conversation, read-only ({conversation.turns.length}{" "}
-                {conversation.turns.length === 1 ? "turn" : "turns"})
-              </summary>
-              <div className="mt-3">
-                <Transcript
-                  turns={conversation.turns}
-                  unsent={conversation.unsent}
-                  readOnly
-                  idPrefix={`earlier-${index}`}
-                  onReviewAgain={reviewAgain}
-                />
-              </div>
-            </details>
-          ))}
-
-          <AssistantWelcome
-            onPick={pickDraft}
-            showActions={turns.length === 0 && !showSending && !unsent}
-            disabled={sending || phase.kind === "unavailable"}
-            boxHasText={draft.trim() !== ""}
+  /** Problems with the turn itself. They look the same in both modes. */
+  const problem: ReactNode =
+    phase.kind === "retry" ? (
+      <Notice title={RETRY_COPY[phase.reason].title} noticeRef={noticeRef}>
+        <p>{RETRY_COPY[phase.reason].body}</p>
+        <div className="flex flex-wrap items-center gap-4">
+          <RetryButton
+            key={phase.attempt}
+            retryAfterS={phase.retryAfterS}
+            onRetry={retry}
           />
-
-          {turns.length > 0 || showSending || unsent ? (
-            <Transcript
-              turns={turns}
-              unsent={showSending ?? unsent}
-              thinking={showSending !== null}
-              readOnly={ended}
-              liveReviewTurn={liveReviewTurn}
-              focusTurn={focusTurn}
-              idPrefix="current"
-              onReviewAgain={reviewAgain}
-              playback={
-                speechState.supported && speechState.choice.kind !== "none"
-                  ? {
-                      speakingId: speechState.speakingId,
-                      onListen: (id, text) => speakReply(id, text, false),
-                      onStop: () => speech.stop(),
-                    }
-                  : undefined
-              }
-            />
-          ) : null}
-
-          {phase.kind === "retry" ? (
-            <Notice
-              title={RETRY_COPY[phase.reason].title}
-              noticeRef={noticeRef}
-            >
-              <p>{RETRY_COPY[phase.reason].body}</p>
-              <div className="flex flex-wrap items-center gap-4">
-                <RetryButton
-                  key={phase.attempt}
-                  retryAfterS={phase.retryAfterS}
-                  onRetry={retry}
-                />
-                <button
-                  type="button"
-                  onClick={startNewConversation}
-                  className={secondaryButtonClass}
-                >
-                  Start a new conversation
-                </button>
-              </div>
-            </Notice>
-          ) : null}
-
-          {phase.kind === "ended" ? (
-            <Notice title={END_COPY[phase.reason].title} noticeRef={noticeRef}>
-              <p>
-                {END_COPY[phase.reason].body} Your messages stay on this page,
-                read-only.
-              </p>
-              <button
-                type="button"
-                onClick={startNewConversation}
-                className={buttonClass}
-              >
-                Start a new conversation
-              </button>
-            </Notice>
-          ) : null}
-
-          {phase.kind === "unavailable" ? (
-            <Notice
-              title="The assistant isn't switched on"
-              noticeRef={noticeRef}
-            >
-              <p>
-                This demo has no assistant connected right now. Try again in a
-                moment, or go back to the workshop page.
-              </p>
-              <div className="flex flex-wrap items-center gap-4">
-                <button
-                  type="button"
-                  onClick={tryAgain}
-                  className={buttonClass}
-                >
-                  Try again
-                </button>
-                <Link href="/" className={linkClass}>
-                  Back to workshop
-                </Link>
-              </div>
-            </Notice>
-          ) : null}
-
-          {phase.kind === "rejected" ? (
-            <Notice title="That message wasn't accepted" noticeRef={noticeRef}>
-              <p>Check the message and send it again.</p>
-            </Notice>
-          ) : null}
-        </div>
-
-        {showComposer ? (
-          <form
-            ref={composerRef}
-            onSubmit={(event) => {
-              event.preventDefault();
-              submit();
-            }}
-            className="z-10 border-t-2 border-bottle bg-primer px-4 py-3 sm:px-6 [@media(min-width:48rem)_and_(min-height:44rem)]:sticky [@media(min-width:48rem)_and_(min-height:44rem)]:bottom-0"
+          <button
+            type="button"
+            onClick={startNewConversation}
+            className={secondaryButtonClass}
           >
-            <div className="flex flex-wrap items-baseline justify-between gap-x-4">
-              <label htmlFor="message" className="text-sm font-bold">
-                Your message
-              </label>
-              <p id="message-count" className="text-sm">
-                {draft.length} of {MAX_MESSAGE_LENGTH} characters
-              </p>
-            </div>
-            {draft !== "" && draft === initialDraft && turns.length === 0 ? (
-              <p className="text-sm">
-                Prepared from the page you came from. Change it or send it as it
-                is.
-              </p>
-            ) : null}
-            <textarea
-              id="message"
-              name="message"
-              ref={textareaRef}
-              rows={2}
-              maxLength={MAX_MESSAGE_LENGTH}
-              value={draft}
-              readOnly={sending}
-              onChange={(event) => {
-                setDraft(event.target.value);
-                setShortened(false);
-                if (phase.kind === "invalid") {
-                  setPhase({ kind: "idle", replied: false });
-                }
-              }}
-              onKeyDown={onKeyDown}
-              aria-describedby="message-help message-count"
-              aria-invalid={phase.kind === "invalid" || undefined}
-              className="mt-1 block w-full resize-y border-2 border-bottle bg-white px-3 py-2 text-lg"
-            />
-            <p id="message-help" className="mt-1 text-sm">
-              Enter sends, Shift and Enter adds a line. Please don&apos;t type
-              personal details.
-            </p>
-            {shortened ? (
-              <p role="status" className="text-sm font-bold">
-                The transcript was shortened to fit {MAX_MESSAGE_LENGTH}{" "}
-                characters. Check the end of your message before sending.
-              </p>
-            ) : null}
-            {phase.kind === "invalid" ? (
-              <div
-                role="alert"
-                tabIndex={-1}
-                ref={noticeRef}
-                className="mt-2 border-l-8 border-rust bg-white p-2 font-bold text-rust"
-              >
-                Write a message of 1 to {MAX_MESSAGE_LENGTH} characters.
-              </div>
-            ) : null}
-            <VoiceInput
-              controlRef={voice}
-              onRecordingStart={onRecordingStart}
-              onTranscript={addTranscript}
-              onReviewChange={setReviewing}
-              disabled={sending || phase.kind === "unavailable"}
-              actions={
-                <button
-                  type="submit"
-                  disabled={sending || phase.kind === "unavailable"}
-                  aria-busy={sending}
-                  className={buttonClass}
-                >
-                  {sending
-                    ? "Sending…"
-                    : transcriptReady
-                      ? "Send transcript"
-                      : "Send message"}
-                </button>
-              }
-            />
-            {turns.length > 0 && !sending ? (
-              <p className="mt-2">
-                <button
-                  type="button"
-                  onClick={startNewConversation}
-                  className="min-h-12 font-bold underline underline-offset-4"
-                >
-                  Start a new conversation
-                </button>
-              </p>
-            ) : null}
-          </form>
-        ) : null}
-
-        <p role="status" className="sr-only">
-          {status}
+            Start a new conversation
+          </button>
+        </div>
+      </Notice>
+    ) : phase.kind === "ended" ? (
+      <Notice title={END_COPY[phase.reason].title} noticeRef={noticeRef}>
+        <p>
+          {END_COPY[phase.reason].body} Your messages stay on this page,
+          read-only.
         </p>
-      </section>
-
-      <aside aria-label="How this answer was made" className="min-w-0">
-        <details
-          ref={timelineRef}
-          className="border-2 border-bottle bg-white/70 p-4"
+        <button
+          type="button"
+          onClick={startNewConversation}
+          className={buttonClass}
         >
-          <summary className="min-h-12 cursor-pointer font-display text-2xl font-extrabold [overflow-wrap:anywhere]">
-            How this answer was made
+          Start a new conversation
+        </button>
+      </Notice>
+    ) : phase.kind === "unavailable" ? (
+      <Notice title="The assistant isn't switched on" noticeRef={noticeRef}>
+        <p>
+          This demo has no assistant connected right now. Try again in a moment,
+          or go back to the workshop page.
+        </p>
+        <div className="flex flex-wrap items-center gap-4">
+          <button type="button" onClick={tryAgain} className={buttonClass}>
+            Try again
+          </button>
+          <Link href="/" className={linkClass}>
+            Back to workshop
+          </Link>
+        </div>
+      </Notice>
+    ) : phase.kind === "rejected" ? (
+      <Notice title="That message wasn't accepted" noticeRef={noticeRef}>
+        <p>Check the message and send it again.</p>
+      </Notice>
+    ) : phase.kind === "invalid" && mode === "voice" ? (
+      <Notice title="That message can't be sent" noticeRef={noticeRef}>
+        <p>Write a message of 1 to {MAX_MESSAGE_LENGTH} characters.</p>
+      </Notice>
+    ) : null;
+
+  /** A network voice is the only one that works, and the visitor has not agreed to it. */
+  const needsConsent =
+    speechState.supported &&
+    speechState.choice.kind === "network" &&
+    !networkConsent;
+
+  const consentNote: ReactNode =
+    sessionActive && needsConsent ? (
+      <div className="space-y-2 rounded-2xl border-l-8 border-rust bg-white p-3">
+        <p className="font-bold text-rust">Replies are not read aloud yet</p>
+        <p className="text-sm">
+          The selected voice is a network voice: it may send the text of each
+          reply to a speech service run by your browser or operating system.
+          Nothing is spoken until you agree.
+        </p>
+        <button
+          type="button"
+          onClick={consent}
+          className={secondaryButtonClass}
+        >
+          Use the network voice
+        </button>
+      </div>
+    ) : null;
+
+  function consent() {
+    consentRef.current = true;
+    setNetworkConsent(true);
+    setSpeechNote("");
+  }
+
+  // --- pieces shared by the surfaces ------------------------------------------------------
+
+  const log = (variant: "text" | "panel") => (
+    <>
+      {earlier.map((conversation, index) => (
+        <details
+          key={index}
+          className="rounded-2xl border border-bottle/15 bg-white/70 px-4"
+        >
+          <summary className="min-h-12 cursor-pointer py-2 font-bold [overflow-wrap:anywhere]">
+            Earlier conversation, read-only ({conversation.turns.length}{" "}
+            {conversation.turns.length === 1 ? "turn" : "turns"})
           </summary>
-          <div className="mt-4">
-            <p className="mb-4 max-w-prose">
-              What you wrote, which tools the assistant asked for and what the
-              schedule service answered. It never shows the assistant&apos;s
-              reasoning.
-            </p>
-            <ExecutionTimeline
-              turns={turns.map((turn) => ({
-                turnIndex: turn.response.turn_index,
-                events: turn.response.events,
-              }))}
+          <div className="pb-3">
+            <Transcript
+              turns={conversation.turns}
+              unsent={conversation.unsent}
+              readOnly
+              idPrefix={`${variant}-earlier-${index}`}
+              onReviewAgain={reviewAgain}
             />
           </div>
         </details>
-      </aside>
+      ))}
+
+      <AssistantWelcome
+        onPick={pickDraft}
+        showActions={
+          variant === "text" && turns.length === 0 && !showSending && !unsent
+        }
+        disabled={sending || phase.kind === "unavailable"}
+        boxHasText={draft.trim() !== ""}
+      />
+
+      {turns.length > 0 || showSending || unsent ? (
+        <Transcript
+          turns={turns}
+          unsent={showSending ?? unsent}
+          thinking={showSending !== null}
+          readOnly={ended}
+          liveReviewTurn={liveReviewTurn}
+          liveReviewElsewhere={variant === "panel"}
+          focusTurn={variant === "text" ? focusTurn : null}
+          idPrefix={variant === "text" ? "current" : "panel"}
+          onReviewAgain={reviewAgain}
+          playback={playback}
+        />
+      ) : null}
+    </>
+  );
+
+  const activityPanel = (
+    <>
+      <p className="mb-4 max-w-prose">
+        What you wrote, which tools the assistant asked for and what the
+        schedule service answered. It never shows the assistant&apos;s
+        reasoning.
+      </p>
+      <ExecutionTimeline
+        turns={turns.map((turn) => ({
+          turnIndex: turn.response.turn_index,
+          events: turn.response.events,
+        }))}
+      />
+    </>
+  );
+
+  const settingsPanel = (
+    <VoiceSettings
+      snapshot={speechState}
+      networkConsent={networkConsent}
+      onConsent={consent}
+      onVoice={(name) => speech.setSettings({ voiceName: name })}
+      onRate={(rate) => speech.setSettings({ rate })}
+      onPreview={() => {
+        const result = speech.speak(PREVIEW_SPEECH_ID, PREVIEW_TEXT, {
+          allowNetwork: consentRef.current,
+        });
+        setSpeechNote(
+          result === "needs_consent"
+            ? "Only a network voice is available. Agree to it first."
+            : "",
+        );
+      }}
+      onStopPreview={() => speech.stop()}
+      onReset={() => speech.resetSettings()}
+      note={speechNote}
+    />
+  );
+
+  const panelTitle: Record<PanelKind, string> = {
+    transcript: "Transcript",
+    timeline: "How this answer was made",
+    settings: "Voice settings",
+  };
+
+  const voiceBusy: "thinking" | "speaking" | null = sending
+    ? "thinking"
+    : speechState.speakingId !== null
+      ? "speaking"
+      : null;
+  const lastTurn = turns.length > 0 ? turns[turns.length - 1] : null;
+  const typedDraft =
+    mode === "voice" && !transcriptPending && draft.trim() !== "";
+
+  const voiceFooter = null;
+
+  const stage = (
+    <VoiceStage
+      sessionActive={sessionActive}
+      onStart={startSession}
+      onEnd={endSession}
+      busy={voiceBusy}
+      onStopSpeaking={() => speech.stop()}
+      draft={draft}
+      onDraft={(text) => {
+        setDraft(text);
+        setShortened(false);
+        if (phase.kind === "invalid")
+          setPhase({ kind: "idle", replied: false });
+      }}
+      transcriptPending={transcriptPending}
+      onTranscript={addTranscript}
+      onRecordingStart={onRecordingStart}
+      onSend={() => submit()}
+      onCancelTranscript={discardTranscript}
+      controlRef={voice}
+      welcome={
+        <AssistantWelcome
+          onPick={pickDraft}
+          showActions={false}
+          disabled
+          boxHasText={false}
+        />
+      }
+      lastTurn={lastTurn}
+      sendingMessage={showSending}
+      unheard={unheard !== null && !needsConsent}
+      onReadAloud={() => {
+        if (unheard) speakReply(unheard.id, unheard.text, false);
+      }}
+      speechAvailable={speechUsable}
+      speechNote={
+        <>
+          {consentNote}
+          {!consentNote && speechNote ? (
+            <p role="status" className="text-sm font-bold">
+              {speechNote}
+            </p>
+          ) : null}
+          {typedDraft ? (
+            <div className="space-y-2 rounded-2xl bg-white p-3 shadow-[0_2px_14px_-6px_rgb(15_59_54/0.35)]">
+              <p className="[overflow-wrap:anywhere]">
+                <span className="font-bold">
+                  A message is waiting in Text:{" "}
+                </span>
+                {draft}
+              </p>
+              <button
+                type="button"
+                onClick={() => chooseMode("text")}
+                className={secondaryButtonClass}
+              >
+                Review it in Text
+              </button>
+            </div>
+          ) : null}
+        </>
+      }
+      problem={problem}
+      review={
+        liveReview && liveReviewTurn !== null ? (
+          <ReviewBlock
+            review={liveReview}
+            live
+            turnIndex={liveReviewTurn}
+            onReviewAgain={reviewAgain}
+            className=""
+          />
+        ) : null
+      }
+      onSwitchToText={() => chooseMode("text")}
+      footer={voiceFooter}
+    />
+  );
+
+  const textMode = (
+    <section
+      aria-labelledby="chat-heading"
+      className="flex h-full min-h-0 min-w-0 flex-col rounded-3xl bg-white/70 shadow-[0_10px_40px_-18px_rgb(15_59_54/0.5)]"
+    >
+      <h2 id="chat-heading" className="sr-only">
+        Conversation
+      </h2>
+
+      <div
+        ref={logRef}
+        className="min-h-0 flex-1 space-y-6 overflow-y-auto p-4 sm:p-6"
+      >
+        {log("text")}
+        {problem && phase.kind !== "invalid" ? problem : null}
+      </div>
+
+      {showComposer ? (
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            submit();
+          }}
+          className="max-h-[60%] shrink-0 overflow-y-auto rounded-b-3xl border-t border-bottle/15 bg-cream px-4 py-3 sm:px-6"
+        >
+          <div className="flex flex-wrap items-baseline justify-between gap-x-4">
+            <label htmlFor="message" className="text-sm font-bold">
+              Your message
+            </label>
+            <p id="message-count" className="text-sm">
+              {draft.length} of {MAX_MESSAGE_LENGTH} characters
+            </p>
+          </div>
+          {draft !== "" && draft === initialDraft && turns.length === 0 ? (
+            <p className="text-sm">
+              Prepared from the page you came from. Change it or send it as it
+              is.
+            </p>
+          ) : null}
+          <textarea
+            id="message"
+            name="message"
+            ref={textareaRef}
+            rows={2}
+            maxLength={MAX_MESSAGE_LENGTH}
+            value={draft}
+            readOnly={sending}
+            onChange={(event) => {
+              setDraft(event.target.value);
+              setShortened(false);
+              if (phase.kind === "invalid") {
+                setPhase({ kind: "idle", replied: false });
+              }
+            }}
+            onKeyDown={onKeyDown}
+            aria-describedby="message-help message-count"
+            aria-invalid={phase.kind === "invalid" || undefined}
+            className="mt-1 block w-full resize-y rounded-2xl border border-bottle/40 bg-white px-3 py-2 text-lg"
+          />
+          <p id="message-help" className="mt-1 text-sm">
+            Enter sends, Shift and Enter adds a line. Please don&apos;t type
+            personal details.
+          </p>
+          {shortened ? (
+            <p role="status" className="text-sm font-bold">
+              The transcript was shortened to fit {MAX_MESSAGE_LENGTH}{" "}
+              characters. Check the end of your message before sending.
+            </p>
+          ) : null}
+          {phase.kind === "invalid" ? (
+            <div
+              role="alert"
+              tabIndex={-1}
+              ref={noticeRef}
+              className="mt-2 rounded-xl border-l-8 border-rust bg-white p-2 font-bold text-rust"
+            >
+              Write a message of 1 to {MAX_MESSAGE_LENGTH} characters.
+            </div>
+          ) : null}
+          <VoiceInput
+            controlRef={voice}
+            onRecordingStart={onRecordingStart}
+            onTranscript={addTranscript}
+            onReviewChange={setReviewing}
+            disabled={sending || phase.kind === "unavailable"}
+            actions={
+              <button
+                type="submit"
+                disabled={sending || phase.kind === "unavailable"}
+                aria-busy={sending}
+                className={buttonClass}
+              >
+                {sending
+                  ? "Sending…"
+                  : transcriptReady
+                    ? "Send transcript"
+                    : "Send message"}
+              </button>
+            }
+          />
+          {turns.length > 0 && !sending ? (
+            <p className="mt-2">
+              <button
+                type="button"
+                onClick={startNewConversation}
+                className="min-h-12 font-bold underline underline-offset-4"
+              >
+                Start a new conversation
+              </button>
+            </p>
+          ) : null}
+        </form>
+      ) : null}
+    </section>
+  );
+
+  const panelBody =
+    panel === "transcript"
+      ? log("panel")
+      : panel === "timeline"
+        ? activityPanel
+        : panel === "settings"
+          ? settingsPanel
+          : null;
+
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 pb-2 sm:px-8">
+        <div
+          role="group"
+          aria-label="Assistant mode"
+          className="inline-flex rounded-full bg-white/80 p-1 shadow-inner"
+        >
+          {(["voice", "text"] as const).map((value) => (
+            <button
+              key={value}
+              type="button"
+              aria-pressed={mode === value}
+              onClick={() => chooseMode(value)}
+              className={`min-h-12 rounded-full px-6 py-2 font-bold ${
+                mode === value ? "bg-bottle text-cream" : "hover:bg-celeste/40"
+              }`}
+            >
+              {value === "voice" ? "Voice" : "Text"}
+            </button>
+          ))}
+        </div>
+        <div className="flex flex-wrap items-center">
+          {mode === "voice" ? (
+            <button
+              type="button"
+              aria-expanded={panel === "transcript"}
+              aria-controls="panel-transcript"
+              onClick={(event) => togglePanel("transcript", event)}
+              className={toolbarButton}
+            >
+              View transcript
+            </button>
+          ) : null}
+          <button
+            type="button"
+            aria-expanded={panel === "timeline"}
+            aria-controls="panel-timeline"
+            onClick={(event) => togglePanel("timeline", event)}
+            className={toolbarButton}
+          >
+            How this answer was made
+          </button>
+          <button
+            type="button"
+            aria-expanded={panel === "settings"}
+            aria-controls="panel-settings"
+            onClick={(event) => togglePanel("settings", event)}
+            className={toolbarButton}
+          >
+            Voice settings
+          </button>
+        </div>
+      </div>
+
+      <div
+        className={`grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)] gap-4 px-4 pb-4 sm:px-8 ${
+          panel ? "lg:grid-cols-[minmax(0,1fr)_26rem]" : ""
+        }`}
+      >
+        <div className={`min-h-0 min-w-0 ${panel ? "max-lg:hidden" : ""}`}>
+          {mode === "voice" ? stage : textMode}
+        </div>
+        {panel ? (
+          <SecondaryPanel
+            key={panel}
+            id={`panel-${panel}`}
+            title={panelTitle[panel]}
+            onClose={() => setPanel(null)}
+            endKey={panel === "transcript" ? turns.length : undefined}
+          >
+            {panelBody}
+          </SecondaryPanel>
+        ) : null}
+      </div>
+
+      <p role="status" className="sr-only">
+        {status}
+      </p>
     </div>
   );
 }

@@ -2,7 +2,21 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { fakeVoice, FakeSynth, FakeUtterance } from "@/test/speech-fakes";
 
-import { createSpeechOutput } from "./speech-output";
+import { createSpeechOutput as create } from "./speech-output";
+
+type Storage = Parameters<typeof create>[2];
+
+function createSpeechOutput(
+  synth: FakeSynth,
+  _Utterance: typeof FakeUtterance,
+  storage?: Storage,
+) {
+  return create(
+    synth as unknown as SpeechSynthesis,
+    FakeUtterance as unknown as typeof SpeechSynthesisUtterance,
+    storage,
+  );
+}
 
 afterEach(() => {
   vi.unstubAllGlobals();

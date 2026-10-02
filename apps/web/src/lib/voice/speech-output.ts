@@ -185,6 +185,11 @@ export type SpeakOptions = {
    * play. "Started" is not "queued": a refused or failed start never calls it.
    */
   onStart?: () => void;
+  /**
+   * Called when the browser fails or refuses part of this reply (for example an autoplay block).
+   * Not called when the reply is stopped or replaced on purpose.
+   */
+  onError?: () => void;
 };
 
 export const UNSUPPORTED: SpeechSnapshot = {
@@ -245,7 +250,10 @@ export function createSpeechOutput(
   } catch {
     // storage refused: the defaults apply
   }
-  const describe = (voices: SpeechSynthesisVoice[], settings: VoiceSettings) => ({
+  const describe = (
+    voices: SpeechSynthesisVoice[],
+    settings: VoiceSettings,
+  ) => ({
     choice: chooseVoice(voices, settings.voiceName),
     voices: voiceOptions(voices),
     settings,
@@ -299,7 +307,7 @@ export function createSpeechOutput(
     resetSettings() {
       changeSettings(DEFAULT_SETTINGS, false);
     },
-    speak(id, text, { allowNetwork = false, onStart } = {}) {
+    speak(id, text, { allowNetwork = false, onStart, onError } = {}) {
       const { choice } = snapshot;
       if (choice.kind === "none") return "unavailable";
       if (choice.kind === "network" && !allowNetwork) return "needs_consent";
@@ -316,7 +324,9 @@ export function createSpeechOutput(
         }
       };
       const fail = () => {
-        if (generation === mine) stop();
+        if (generation !== mine) return;
+        stop();
+        onError?.();
       };
       try {
         chunks.forEach((chunk, index) => {
