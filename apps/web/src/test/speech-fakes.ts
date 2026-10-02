@@ -23,6 +23,10 @@ export function fakeVoice({
 export class FakeUtterance {
   voice: SpeechSynthesisVoice | null = null;
   lang = "";
+  rate = 1;
+  pitch = 1;
+  volume = 1;
+  onstart: (() => void) | null = null;
   onend: (() => void) | null = null;
   onerror: (() => void) | null = null;
   constructor(readonly text: string) {}

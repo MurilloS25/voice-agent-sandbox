@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from "react";
 
 import {
+  browserStorage,
   createSpeechOutput,
   UNSUPPORTED,
   type SpeechOutput,
@@ -20,6 +21,7 @@ export function getSpeechOutput(): SpeechOutput {
     typeof SpeechSynthesisUtterance !== "undefined"
       ? SpeechSynthesisUtterance
       : undefined,
+    browserStorage(),
   );
   return shared;
 }
