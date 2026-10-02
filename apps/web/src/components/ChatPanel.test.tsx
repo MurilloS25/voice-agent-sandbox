@@ -71,7 +71,7 @@ afterEach(() => {
 
 describe("ChatPanel: the empty conversation", () => {
   it("invites the visitor to act, labels the composer and does not take focus", () => {
-    render(<ChatPanel initialMode="text" />);
+    render(<ChatPanel assumeReady initialMode="text" />);
 
     expect(
       screen.getByRole("heading", { name: "Conversation" }),
@@ -96,7 +96,7 @@ describe("ChatPanel: the empty conversation", () => {
   it.each(QUICK_ACTIONS)(
     "fills the composer from the quick start $label without sending it",
     (action) => {
-      render(<ChatPanel initialMode="text" />);
+      render(<ChatPanel assumeReady initialMode="text" />);
       fireEvent.click(screen.getByRole("button", { name: action.label }));
       expect(box()).toHaveValue(action.draft);
       expect(box()).toHaveFocus();
@@ -105,7 +105,7 @@ describe("ChatPanel: the empty conversation", () => {
   );
 
   it("counts characters", () => {
-    render(<ChatPanel initialMode="text" />);
+    render(<ChatPanel assumeReady initialMode="text" />);
     type("hello");
     expect(screen.getByText("5 of 500 characters")).toBeInTheDocument();
   });
@@ -113,7 +113,7 @@ describe("ChatPanel: the empty conversation", () => {
 
 describe("ChatPanel: sending", () => {
   it("makes the conversation id and a turn id on the first send and sends turn 1", async () => {
-    render(<ChatPanel initialMode="text" />);
+    render(<ChatPanel assumeReady initialMode="text" />);
     await send("  What do you do?  ");
 
     expect(submissions()).toEqual([
@@ -127,7 +127,7 @@ describe("ChatPanel: sending", () => {
   });
 
   it("shows the answer, clears the composer, announces it and moves focus to the reply", async () => {
-    render(<ChatPanel initialMode="text" />);
+    render(<ChatPanel assumeReady initialMode="text" />);
     await send("What do you do?");
 
     expect(screen.getByText("You")).toBeInTheDocument();
@@ -147,7 +147,7 @@ describe("ChatPanel: sending", () => {
   });
 
   it("keeps the conversation id, makes a new turn id and advances the turn index", async () => {
-    render(<ChatPanel initialMode="text" />);
+    render(<ChatPanel assumeReady initialMode="text" />);
     await send("one");
     await send("two");
     await send("three");
@@ -166,7 +166,7 @@ describe("ChatPanel: sending", () => {
   });
 
   it("sends on Enter, adds a line on Shift+Enter and ignores Enter while composing text", async () => {
-    render(<ChatPanel initialMode="text" />);
+    render(<ChatPanel assumeReady initialMode="text" />);
     type("hello");
 
     await act(async () => {
@@ -184,7 +184,7 @@ describe("ChatPanel: sending", () => {
   });
 
   it("allows a newline typed with Shift+Enter inside the message", async () => {
-    render(<ChatPanel initialMode="text" />);
+    render(<ChatPanel assumeReady initialMode="text" />);
     await send("line one\nline two");
     expect(submissions()[0].message).toBe("line one\nline two");
   });
@@ -196,7 +196,7 @@ describe("ChatPanel: sending", () => {
         finish = resolve;
       }),
     );
-    render(<ChatPanel initialMode="text" />);
+    render(<ChatPanel assumeReady initialMode="text" />);
     type("hello");
 
     await act(async () => {
@@ -222,7 +222,7 @@ describe("ChatPanel: sending", () => {
   });
 
   it("refuses an empty or oversized message in the browser, without calling the action", async () => {
-    render(<ChatPanel initialMode="text" />);
+    render(<ChatPanel assumeReady initialMode="text" />);
     type("   ");
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Send message" }));
@@ -242,7 +242,7 @@ describe("ChatPanel: uncertain outcomes and pauses", () => {
       reason: "unknown",
       retryAfterS: null,
     });
-    render(<ChatPanel initialMode="text" />);
+    render(<ChatPanel assumeReady initialMode="text" />);
     await send("hello there");
 
     const alert = screen.getByRole("alert");
@@ -279,7 +279,7 @@ describe("ChatPanel: uncertain outcomes and pauses", () => {
         reason: "unknown",
         retryAfterS: null,
       });
-    render(<ChatPanel initialMode="text" />);
+    render(<ChatPanel assumeReady initialMode="text" />);
     await send("hello");
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Try again" }));
@@ -306,7 +306,7 @@ describe("ChatPanel: uncertain outcomes and pauses", () => {
 
   it("treats a failure of the action itself as an unknown outcome and retries the same message", async () => {
     sendTurn.mockRejectedValueOnce(new Error("network"));
-    render(<ChatPanel initialMode="text" />);
+    render(<ChatPanel assumeReady initialMode="text" />);
     await send("hello");
     expect(screen.getByRole("alert")).toHaveTextContent("couldn't tell");
 
@@ -328,7 +328,7 @@ describe("ChatPanel: uncertain outcomes and pauses", () => {
         reason,
         retryAfterS: seconds,
       });
-      render(<ChatPanel initialMode="text" />);
+      render(<ChatPanel assumeReady initialMode="text" />);
       await send("hello");
 
       expect(screen.getByRole("alert")).toHaveTextContent(title);
@@ -366,7 +366,7 @@ describe("ChatPanel: ways out", () => {
       reason: "unknown",
       retryAfterS: null,
     });
-    render(<ChatPanel initialMode="text" />);
+    render(<ChatPanel assumeReady initialMode="text" />);
     await send("hello");
 
     const alert = screen.getByRole("alert");
@@ -391,7 +391,7 @@ describe("ChatPanel: ways out", () => {
   });
 
   it("says the conversation is full instead of sending turn 31, and keeps the draft", async () => {
-    render(<ChatPanel initialMode="text" />);
+    render(<ChatPanel assumeReady initialMode="text" />);
     for (let n = 1; n <= 30; n += 1) await send(`message ${n}`);
     expect(sendTurn).toHaveBeenCalledTimes(30);
 
@@ -419,7 +419,7 @@ describe("ChatPanel: ways out", () => {
   }, 30000);
 
   it("clears the invalid-message flag as soon as the text is edited", async () => {
-    render(<ChatPanel initialMode="text" />);
+    render(<ChatPanel assumeReady initialMode="text" />);
     type("   ");
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Send message" }));
@@ -434,7 +434,7 @@ describe("ChatPanel: ways out", () => {
 describe("ChatPanel: the assistant is not available", () => {
   it("offers Try again and Back to workshop, never the manual form", async () => {
     sendTurn.mockResolvedValueOnce({ kind: "agent_unavailable" });
-    render(<ChatPanel initialMode="text" />);
+    render(<ChatPanel assumeReady initialMode="text" />);
     await send("hello");
 
     const alert = screen.getByRole("alert");
@@ -456,7 +456,7 @@ describe("ChatPanel: the assistant is not available", () => {
 
   it("shows a message the API refused and lets it be edited", async () => {
     sendTurn.mockResolvedValueOnce({ kind: "rejected" });
-    render(<ChatPanel initialMode="text" />);
+    render(<ChatPanel assumeReady initialMode="text" />);
     await send("hello");
 
     expect(screen.getByRole("alert")).toHaveTextContent(
@@ -483,7 +483,7 @@ describe("ChatPanel: a conversation that cannot continue", () => {
   ] as const)(
     "%s: keeps the transcript read-only and offers a new conversation",
     async (reason, title) => {
-      render(<ChatPanel initialMode="text" />);
+      render(<ChatPanel assumeReady initialMode="text" />);
       await send("first question");
       sendTurn.mockResolvedValueOnce({ kind: "ended", reason });
       await send("second question");
@@ -510,7 +510,7 @@ describe("ChatPanel: a conversation that cannot continue", () => {
   );
 
   it("starts a new conversation while the old transcript stays read-only", async () => {
-    render(<ChatPanel initialMode="text" />);
+    render(<ChatPanel assumeReady initialMode="text" />);
     await send("first question");
     sendTurn.mockResolvedValueOnce({ kind: "ended", reason: "not_found" });
     await send("second question");
@@ -539,7 +539,7 @@ describe("ChatPanel: a conversation that cannot continue", () => {
   });
 
   it("can also be restarted by choice, which keeps the old transcript", async () => {
-    render(<ChatPanel initialMode="text" />);
+    render(<ChatPanel assumeReady initialMode="text" />);
     await send("hello");
     await act(async () => {
       fireEvent.click(
@@ -564,7 +564,7 @@ describe("ChatPanel: degraded answers and reviews", () => {
         },
       }),
     });
-    render(<ChatPanel initialMode="text" />);
+    render(<ChatPanel assumeReady initialMode="text" />);
     await send("hello");
 
     const reply = document.getElementById("current-reply-1") as HTMLElement;
@@ -577,7 +577,7 @@ describe("ChatPanel: degraded answers and reviews", () => {
 
   it("renders a prepared review with the existing ConfirmForm and the token only in its hidden field", async () => {
     sendTurn.mockResolvedValueOnce({ kind: "ok", turn: reviewTurn(1) });
-    const { container } = render(<ChatPanel initialMode="text" />);
+    const { container } = render(<ChatPanel assumeReady initialMode="text" />);
     await send("the first one");
 
     expect(
@@ -613,7 +613,7 @@ describe("ChatPanel: degraded answers and reviews", () => {
         },
       }),
     });
-    render(<ChatPanel initialMode="text" />);
+    render(<ChatPanel assumeReady initialMode="text" />);
     await send("the first one");
 
     expect(screen.getByText("System")).toBeInTheDocument();
@@ -627,7 +627,7 @@ describe("ChatPanel: degraded answers and reviews", () => {
     sendTurn
       .mockResolvedValueOnce({ kind: "ok", turn: reviewTurn(1) })
       .mockResolvedValueOnce({ kind: "ok", turn: reviewTurn(2) });
-    const { container } = render(<ChatPanel initialMode="text" />);
+    const { container } = render(<ChatPanel assumeReady initialMode="text" />);
     await send("one");
     await send("two");
 
@@ -641,7 +641,7 @@ describe("ChatPanel: degraded answers and reviews", () => {
 
   it("removes every confirm button from a conversation that ended", async () => {
     sendTurn.mockResolvedValueOnce({ kind: "ok", turn: reviewTurn(1) });
-    const { container } = render(<ChatPanel initialMode="text" />);
+    const { container } = render(<ChatPanel assumeReady initialMode="text" />);
     await send("one");
     sendTurn.mockResolvedValueOnce({ kind: "ended", reason: "expired" });
     await send("two");
@@ -662,7 +662,7 @@ describe("ChatPanel: safety and storage", () => {
       kind: "ok",
       turn: agentTurn(1, { reply: { source: "assistant", text: hostile } }),
     });
-    const { container } = render(<ChatPanel initialMode="text" />);
+    const { container } = render(<ChatPanel assumeReady initialMode="text" />);
     await send("hello");
 
     expect(container.querySelector("img, strong, script")).toBeNull();
@@ -674,7 +674,7 @@ describe("ChatPanel: safety and storage", () => {
     const setItem = vi.spyOn(Storage.prototype, "setItem");
     const getItem = vi.spyOn(Storage.prototype, "getItem");
     const cookie = vi.spyOn(document, "cookie", "set");
-    render(<ChatPanel initialMode="text" />);
+    render(<ChatPanel assumeReady initialMode="text" />);
     await send("hello");
     await send("again");
 
@@ -687,7 +687,7 @@ describe("ChatPanel: safety and storage", () => {
 
   it("does not show ids from the API anywhere on the page", async () => {
     sendTurn.mockResolvedValueOnce({ kind: "ok", turn: reviewTurn(1) });
-    const { container } = render(<ChatPanel initialMode="text" />);
+    const { container } = render(<ChatPanel assumeReady initialMode="text" />);
     await send("hello");
 
     const text = container.textContent ?? "";
@@ -704,7 +704,7 @@ describe("ChatPanel: the activity panel", () => {
     screen.getByRole("button", { name: "How this answer was made" });
 
   it("is closed at first and opens as a labelled region that takes focus", () => {
-    render(<ChatPanel initialMode="text" />);
+    render(<ChatPanel assumeReady initialMode="text" />);
     expect(opener()).toHaveAttribute("aria-expanded", "false");
     expect(
       screen.queryByRole("complementary", { name: "How this answer was made" }),
@@ -724,7 +724,7 @@ describe("ChatPanel: the activity panel", () => {
   });
 
   it("closes with its button or Escape and gives focus back to what opened it", () => {
-    render(<ChatPanel initialMode="text" />);
+    render(<ChatPanel assumeReady initialMode="text" />);
     fireEvent.click(opener());
     fireEvent.click(
       screen.getByRole("button", { name: "Close how this answer was made" }),
@@ -742,7 +742,7 @@ describe("ChatPanel: the activity panel", () => {
   });
 
   it("keeps the conversation and the composer while it is open", async () => {
-    render(<ChatPanel initialMode="text" />);
+    render(<ChatPanel assumeReady initialMode="text" />);
     await send("hello");
     fireEvent.click(opener());
     expect(screen.getByText("Answer to: hello")).toBeInTheDocument();
@@ -752,7 +752,7 @@ describe("ChatPanel: the activity panel", () => {
 
 describe("ChatPanel: accessibility", () => {
   it("has no violations when empty", async () => {
-    const { container } = render(<ChatPanel initialMode="text" />);
+    const { container } = render(<ChatPanel assumeReady initialMode="text" />);
     await expectNoA11yViolations(container);
   });
 
@@ -760,7 +760,7 @@ describe("ChatPanel: accessibility", () => {
     sendTurn
       .mockResolvedValueOnce({ kind: "ok", turn: agentTurn(1) })
       .mockResolvedValueOnce({ kind: "ok", turn: reviewTurn(2) });
-    const { container } = render(<ChatPanel initialMode="text" />);
+    const { container } = render(<ChatPanel assumeReady initialMode="text" />);
     await send("one");
     await send("two");
     await expectNoA11yViolations(container);
@@ -777,7 +777,7 @@ describe("ChatPanel: accessibility", () => {
     ["a refused message", { kind: "rejected" }],
   ] as const)("has no violations for %s", async (_name, outcome) => {
     sendTurn.mockResolvedValueOnce(outcome);
-    const { container } = render(<ChatPanel initialMode="text" />);
+    const { container } = render(<ChatPanel assumeReady initialMode="text" />);
     await send("hello");
     await expectNoA11yViolations(container);
   });
@@ -832,7 +832,7 @@ describe("ChatPanel: voice input", () => {
 
   it("puts the transcript in the message box, focuses it, and does not send it", async () => {
     serve();
-    render(<ChatPanel initialMode="text" />);
+    render(<ChatPanel assumeReady initialMode="text" />);
 
     await dictate();
 
@@ -850,7 +850,7 @@ describe("ChatPanel: voice input", () => {
 
   it("lets the visitor edit the transcript, and only Send sends the edited text", async () => {
     serve();
-    render(<ChatPanel initialMode="text" />);
+    render(<ChatPanel assumeReady initialMode="text" />);
     await dictate();
     await vi.waitFor(() => expect(box().value).not.toBe(""));
 
@@ -867,7 +867,7 @@ describe("ChatPanel: voice input", () => {
 
   it("adds the transcript after what was already typed", async () => {
     serve({ text: "on Tuesday" });
-    render(<ChatPanel initialMode="text" />);
+    render(<ChatPanel assumeReady initialMode="text" />);
     type("Do you have time for a flat repair");
 
     await dictate();
@@ -880,7 +880,7 @@ describe("ChatPanel: voice input", () => {
 
   it("never lets the box go over 500 characters", async () => {
     serve({ text: "y".repeat(400) });
-    render(<ChatPanel initialMode="text" />);
+    render(<ChatPanel assumeReady initialMode="text" />);
     type("x".repeat(300));
 
     await dictate();
@@ -891,7 +891,7 @@ describe("ChatPanel: voice input", () => {
 
   it("keeps typing and sending available when voice fails", async () => {
     serve({ available: false });
-    render(<ChatPanel initialMode="text" />);
+    render(<ChatPanel assumeReady initialMode="text" />);
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Speak" }));
     });
@@ -912,7 +912,7 @@ describe("ChatPanel: voice input", () => {
 
   it("keeps the typed message when a recording fails", async () => {
     serve({ available: false });
-    render(<ChatPanel initialMode="text" />);
+    render(<ChatPanel assumeReady initialMode="text" />);
     type("I was typing this");
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Speak" }));
@@ -927,7 +927,7 @@ describe("ChatPanel: voice input", () => {
     sendTurn.mockImplementation(
       () => new Promise<TurnOutcome>((resolve) => (release = resolve)),
     );
-    render(<ChatPanel initialMode="text" />);
+    render(<ChatPanel assumeReady initialMode="text" />);
     await send("Hello");
     expect(screen.getByRole("button", { name: "Speak" })).toBeDisabled();
     await act(async () => {
@@ -937,7 +937,7 @@ describe("ChatPanel: voice input", () => {
 
   it("tells the visitor when the transcript had to be shortened, and the notice goes away on edit", async () => {
     serve({ text: "y".repeat(400) });
-    render(<ChatPanel initialMode="text" />);
+    render(<ChatPanel assumeReady initialMode="text" />);
     type("x".repeat(300));
 
     await dictate();
@@ -954,7 +954,7 @@ describe("ChatPanel: voice input", () => {
 
   it("does not say it was shortened when everything fit", async () => {
     serve({ text: "short words" });
-    render(<ChatPanel initialMode="text" />);
+    render(<ChatPanel assumeReady initialMode="text" />);
     await dictate();
     await vi.waitFor(() => expect(box().value).toBe("short words"));
     expect(screen.queryByText(/was shortened/)).toBeNull();
@@ -969,7 +969,7 @@ describe("ChatPanel: voice input", () => {
             answer = resolve; // ignores the abort: a late answer must still be dropped
           }),
     );
-    render(<ChatPanel initialMode="text" />);
+    render(<ChatPanel assumeReady initialMode="text" />);
     await dictate();
     await screen.findByRole("button", { name: "Cancel transcription" });
 
@@ -988,7 +988,7 @@ describe("ChatPanel: voice input", () => {
 
   it("has no axe violations with voice input present", async () => {
     serve();
-    const { container } = render(<ChatPanel initialMode="text" />);
+    const { container } = render(<ChatPanel assumeReady initialMode="text" />);
     await expectNoA11yViolations(container);
   });
 });
@@ -1001,7 +1001,7 @@ describe("ChatPanel: spoken replies", () => {
   function setup(voices = [LOCAL]) {
     synth = installSpeech(voices);
     resetSpeechOutput(); // the controller reads the browser again
-    return render(<ChatPanel initialMode="text" />);
+    return render(<ChatPanel assumeReady initialMode="text" />);
   }
 
   afterEach(() => {
@@ -1360,7 +1360,7 @@ describe("ChatPanel: spoken replies", () => {
 
     it("says so and the chat still works when the browser has no speech synthesis", async () => {
       resetSpeechOutput();
-      render(<ChatPanel initialMode="text" />); // jsdom has none
+      render(<ChatPanel assumeReady initialMode="text" />); // jsdom has none
       openSettings();
       expect(screen.getByText(/can't speak replies/)).toBeInTheDocument();
       await send("Hello");

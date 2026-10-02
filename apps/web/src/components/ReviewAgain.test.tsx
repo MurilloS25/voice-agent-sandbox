@@ -58,7 +58,7 @@ async function press(name: string) {
 /** A chat with two review cards: the first is no longer active and offers "Review this time again". */
 async function twoReviews(initialDraft = "") {
   const view = render(
-    <ChatPanel initialMode="text" initialDraft={initialDraft} />,
+    <ChatPanel assumeReady initialMode="text" initialDraft={initialDraft} />,
   );
   for (const text of ["the first one", "the first one again"]) {
     type(text);
@@ -135,7 +135,9 @@ describe("Review again with the same context as the page already has", () => {
 
   it("also works from the Review again link of a review that expired", async () => {
     confirmBooking.mockResolvedValueOnce({ kind: "expired" });
-    render(<ChatPanel initialMode="text" initialDraft={SAME_CONTEXT} />);
+    render(
+      <ChatPanel assumeReady initialMode="text" initialDraft={SAME_CONTEXT} />,
+    );
     type("the first one");
     await press("Send message");
     await press("Confirm booking");
@@ -151,17 +153,27 @@ describe("Review again with the same context as the page already has", () => {
 describe("contexts that arrive through the address still work as before", () => {
   it("uses the initial context, and a new one later, only into an empty box", () => {
     const { rerender } = render(
-      <ChatPanel initialMode="text" initialDraft="First context" />,
+      <ChatPanel assumeReady initialMode="text" initialDraft="First context" />,
     );
     expect(box()).toHaveValue("First context");
     type("");
-    rerender(<ChatPanel initialMode="text" initialDraft="Second context" />);
+    rerender(
+      <ChatPanel
+        assumeReady
+        initialMode="text"
+        initialDraft="Second context"
+      />,
+    );
     expect(box()).toHaveValue("Second context");
     type("typed");
-    rerender(<ChatPanel initialMode="text" initialDraft="Third context" />);
+    rerender(
+      <ChatPanel assumeReady initialMode="text" initialDraft="Third context" />,
+    );
     expect(box()).toHaveValue("typed");
     type("");
-    rerender(<ChatPanel initialMode="text" initialDraft="Third context" />);
+    rerender(
+      <ChatPanel assumeReady initialMode="text" initialDraft="Third context" />,
+    );
     expect(box()).toHaveValue(""); // the same address context is not applied twice
     expect(sendTurn).not.toHaveBeenCalled();
   });

@@ -12,6 +12,14 @@ const { getBusinessOverview } = vi.hoisted(() => ({
 }));
 vi.mock("@/lib/api/client", () => ({ getBusinessOverview }));
 vi.mock("./actions", () => ({ sendTurn: vi.fn() }));
+// The page checks the backend before it lets anyone talk; here the backend is always ready.
+vi.mock("@/lib/readiness", () => ({
+  useApiReadiness: () => ({
+    state: "ready",
+    elapsedS: 0,
+    retry: () => undefined,
+  }),
+}));
 vi.mock("@/app/book/actions", () => ({ confirmBooking: vi.fn() }));
 
 const toText = () =>

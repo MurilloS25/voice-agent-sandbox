@@ -88,6 +88,8 @@ const CODES: Record<string, [VoiceErrorCode, number]> = {
   validation_error: ["invalid", 422],
   no_speech: ["no_speech", 422],
   speech_busy: ["busy", 429],
+  rate_limited: ["busy", 429],
+  demo_budget_reached: ["limit_reached", 503],
   transcription_failed: ["failed", 502],
   transcription_timeout: ["timeout", 504],
 };

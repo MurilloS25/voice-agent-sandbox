@@ -30,6 +30,7 @@ export type TurnOutcome =
       retryAfterS: number | null;
     }
   | { kind: "agent_unavailable" } // no assistant is configured
+  | { kind: "limit_reached" } // today's demo allowance is spent: nothing to retry now
   | { kind: "ended"; reason: EndReason }
   | { kind: "rejected" }; // the message itself was refused: edit it
 

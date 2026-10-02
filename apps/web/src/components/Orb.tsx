@@ -23,7 +23,16 @@ const spokeLines = Array.from({ length: SPOKES }, (_, index) => {
   };
 });
 
+const dots = (
+  <>
+    <circle cx="6" cy="12" r="1.2" fill="currentColor" />
+    <circle cx="12" cy="12" r="1.2" fill="currentColor" />
+    <circle cx="18" cy="12" r="1.2" fill="currentColor" />
+  </>
+);
+
 const glyphs: Record<StageKind, ReactNode> = {
+  starting: dots,
   start: <path d="M8 5.5v13l11-6.5z" fill="currentColor" stroke="none" />, // play
   ready: (
     <>
@@ -172,7 +181,7 @@ export function Orb({
             opacity="0.55"
           />
         ) : null}
-        {stage === "preparing" ? (
+        {stage === "preparing" || stage === "starting" ? (
           <circle
             className="orb-pulse"
             cx="100"

@@ -43,6 +43,15 @@ export async function sendTurn(input: Pending): Promise<TurnOutcome> {
   switch (result.code) {
     case "agent_unavailable":
       return { kind: "agent_unavailable" };
+    case "demo_budget_reached":
+      return { kind: "limit_reached" };
+    case "rate_limited":
+      // Too many requests from this visitor or from everyone: wait and send the same message.
+      return {
+        kind: "retry",
+        reason: "busy",
+        retryAfterS: result.retryAfterS ?? 10,
+      };
     case "turn_in_progress":
       return {
         kind: "retry",

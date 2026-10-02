@@ -3,6 +3,7 @@
  * the turn in flight, the speech controller): nothing here is set by a timer.
  */
 export type StageKind =
+  | "starting" // the backend is waking up: nothing can be sent yet
   | "start" // the voice session has not been started by the visitor yet
   | "ready"
   | "preparing" // waiting for the microphone permission
@@ -23,6 +24,11 @@ export const STAGE_COPY: Record<
     action: string;
   }
 > = {
+  starting: {
+    label: "Starting workshop assistant…",
+    hint: "The first visit after a quiet period can take about a minute. Nothing is sent until it is ready.",
+    action: "Please wait",
+  },
   start: {
     label: "Talk to the workshop",
     hint: "Start plays a spoken welcome. Nothing is recorded until you tap to speak.",

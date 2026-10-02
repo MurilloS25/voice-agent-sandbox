@@ -103,7 +103,7 @@ function setup(
   }
   synth = installSpeech(props.voices ?? [LOCAL]);
   resetSpeechOutput(); // the controller reads the browser (and its storage) again
-  return render(<ChatPanel initialMode={props.initialMode} />);
+  return render(<ChatPanel assumeReady initialMode={props.initialMode} />);
 }
 
 /** Start the session and let the welcome finish, so the stage is Ready. */
@@ -1189,7 +1189,7 @@ describe("when voice is not available", () => {
       JSON.stringify({ reviewBeforeSending: true }),
     );
     resetSpeechOutput();
-    render(<ChatPanel />);
+    render(<ChatPanel assumeReady />);
     await press("Start voice assistant");
     expect(screen.getByText(/can't read replies aloud/)).toBeInTheDocument();
     await speakToTheAssistant("first take");

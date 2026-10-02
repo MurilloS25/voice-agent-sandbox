@@ -98,6 +98,11 @@ export function problemCopy(
       return { title: "Voice input can't be reached", body: instead };
     case "forbidden":
       return { title: "Voice input was refused", body: instead };
+    case "limit_reached":
+      return {
+        title: "The demo has reached its daily limit for voice input",
+        body: `Try again tomorrow. ${instead}`,
+      };
   }
 }
 

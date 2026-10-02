@@ -474,3 +474,46 @@ describe("sendAgentTurn", () => {
     expect(json).not.toHaveBeenCalled();
   });
 });
+
+describe("server-to-server credentials", () => {
+  it("sends the bearer secret and never a visitor header without a request scope", async () => {
+    vi.stubEnv("API_SHARED_SECRET", "x".repeat(40));
+    fetchMock.mockResolvedValue(json(business));
+    await getAppointment("00000000-0000-4000-8000-000000000000");
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    const headers = init.headers as Record<string, string>;
+    expect(headers.authorization).toBe(`Bearer ${"x".repeat(40)}`);
+    expect(headers["x-client-id"]).toBeUndefined();
+  });
+
+  it("treats a 401 as an unavailable service without saying why", async () => {
+    fetchMock.mockResolvedValue(
+      json({ error: { code: "unauthorized", message: "m" } }, 401),
+    );
+    expect(await getAvailability("flat-repair", "2026-10-06")).toEqual({
+      kind: "unavailable",
+    });
+  });
+
+  it("keeps a spent demo budget distinct from an outage", async () => {
+    const body = {
+      error: { code: "demo_budget_reached", message: "Try again tomorrow." },
+    };
+    fetchMock.mockResolvedValue(json(body, 503));
+    const result = await getAvailability("flat-repair", "2026-10-06");
+    expect(result).toMatchObject({
+      kind: "error",
+      status: 503,
+      code: "demo_budget_reached",
+    });
+  });
+
+  it("does not call the API at all when production config is unsafe", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("API_BASE_URL", "http://plain.example.invalid");
+    expect(await getAvailability("flat-repair", "2026-10-06")).toEqual({
+      kind: "unavailable",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});

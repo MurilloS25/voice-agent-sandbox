@@ -10,7 +10,7 @@ vi.mock("@/lib/api/client", () => ({ sendTranscription }));
 import { POST, READ_TIMEOUT_MS } from "./route";
 
 const URL_BASE = "http://localhost:3000/api/voice/transcribe";
-const LIMIT = 512 * 1024;
+const LIMIT = 256 * 1024;
 const OK: ApiResult<Transcription> = {
   kind: "ok",
   data: { text: "Do you open on Saturdays", language: "en" },
@@ -132,7 +132,7 @@ describe("validation before anything is forwarded", () => {
   });
 
   it("accepts a body of exactly the limit", async () => {
-    const { stream } = countingStream(8, 64 * 1024);
+    const { stream } = countingStream(4, 64 * 1024);
     const response = await POST(audioRequest(stream));
     expect(response.status).toBe(200);
     const sent = sendTranscription.mock.calls[0][0] as Uint8Array;

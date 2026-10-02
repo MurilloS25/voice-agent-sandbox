@@ -58,6 +58,7 @@ describe("sendTranscription", () => {
         }),
     );
     const pending = sendTranscription(audio, "audio/webm", controller.signal);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
     const sent = (fetchMock.mock.calls[0] as [string, RequestInit])[1].signal;
     expect(sent?.aborted).toBe(false);
 
