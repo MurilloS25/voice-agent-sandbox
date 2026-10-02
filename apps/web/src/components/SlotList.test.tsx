@@ -33,7 +33,7 @@ describe("SlotList", () => {
     expect(screen.getByText(/takes 30 minutes/)).toBeInTheDocument();
   });
 
-  it("links each time to the review step, which saves nothing by itself", () => {
+  it("shows times as text and sends the visitor to the assistant, carrying no time", () => {
     render(
       <SlotList
         availability={availability}
@@ -43,17 +43,18 @@ describe("SlotList", () => {
       />,
     );
 
+    // One link, to the assistant, with the service and the day only. No time travels in a URL.
     const links = screen.getAllByRole("link");
-    expect(links).toHaveLength(2);
+    expect(links).toHaveLength(1);
     expect(links[0]).toHaveAttribute(
       "href",
-      "/book?service=flat-repair&start=2026-10-01T13%3A00%3A00Z",
+      "/assistant?service=flat-repair&date=2026-10-01",
     );
-    // The accessible name starts with the visible time (WCAG label-in-name) and says what
-    // the link does.
     expect(links[0]).toHaveAccessibleName(
-      /^9:00 AM, review the booking for Flat repair$/,
+      "Ask the assistant to book Flat repair",
     );
+    expect(document.body.innerHTML).not.toContain("/book");
+    expect(document.body.innerHTML).not.toContain("start=");
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
     expect(
       screen.getByText(/nothing is booked until you confirm/),
@@ -72,6 +73,9 @@ describe("SlotList", () => {
     expect(
       screen.getByText("The shop is closed on Mondays. Choose another date."),
     ).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "Ask the assistant for other options" }),
+    ).toHaveAttribute("href", "/assistant?service=flat-repair&date=2026-10-05");
   });
 
   it("explains a fully booked day differently from a closed day", () => {

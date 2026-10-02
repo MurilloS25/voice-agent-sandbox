@@ -7,7 +7,7 @@ import type { ReactNode } from "react";
 import { ConfirmForm } from "@/app/book/ConfirmForm";
 import type { Turn } from "@/app/assistant/state";
 import { BookingReview } from "@/components/BookingReview";
-import { reviewHref } from "@/components/SlotList";
+import { assistantHref } from "@/lib/assistant-link";
 import type { AgentTurn } from "@/lib/api/client";
 import { tryLocalDateOf } from "@/lib/format";
 
@@ -26,6 +26,8 @@ type TranscriptProps = {
   turns: Turn[];
   /** A message that has not been answered yet (shown while it is retried). */
   unsent?: string | null;
+  /** The assistant is working on `unsent`: a placeholder reply holds its place. */
+  thinking?: boolean;
   /** Earlier conversations are read-only: no confirm button anywhere in them. */
   readOnly?: boolean;
   /** The turn whose review may be confirmed here, if any. */
@@ -38,35 +40,51 @@ type TranscriptProps = {
   playback?: Playback;
 };
 
-const labelClass = "font-bold";
-const textClass = "mt-1 whitespace-pre-wrap [overflow-wrap:anywhere]";
+type Tone = "user" | "assistant" | "system";
+
+/** A short text mark beside assistant and system messages, so the speaker is never only a colour. */
+function Mark({ tone }: { tone: Tone }) {
+  if (tone === "user") return null;
+  return (
+    <span
+      aria-hidden="true"
+      className={`mt-1 flex h-9 w-9 shrink-0 items-center justify-center font-display text-xl leading-none font-extrabold ${
+        tone === "assistant" ? "bg-bottle text-celeste" : "bg-rust text-white"
+      }`}
+    >
+      {tone === "assistant" ? "Q" : "!"}
+    </span>
+  );
+}
 
 function Message({
   who,
   tone,
   children,
-  id,
-  focusable,
+  footer,
 }: {
   who: string;
-  tone: "user" | "assistant" | "system";
+  tone: Tone;
   children: ReactNode;
-  id?: string;
-  focusable?: boolean;
+  footer?: ReactNode;
 }) {
-  const toneClass = {
-    user: "border-bottle bg-white",
-    assistant: "border-moss bg-celeste/40",
-    system: "border-rust bg-white/60",
+  const bubbleClass = {
+    user: "bg-bottle text-primer",
+    assistant: "border-2 border-moss bg-celeste/40",
+    system: "border-2 border-l-8 border-rust bg-white",
   }[tone];
   return (
     <div
-      id={id}
-      tabIndex={focusable ? -1 : undefined}
-      className={`max-w-prose border-l-8 p-3 ${toneClass}`}
+      className={`flex min-w-0 gap-3 ${tone === "user" ? "justify-end" : ""}`}
     >
-      <p className={labelClass}>{who}</p>
-      <p className={textClass}>{children}</p>
+      <Mark tone={tone} />
+      <div className={`max-w-prose min-w-0 p-3 ${bubbleClass}`}>
+        <p className="text-sm font-bold">{who}</p>
+        <p className="mt-1 [overflow-wrap:anywhere] whitespace-pre-wrap">
+          {children}
+        </p>
+        {footer ? <div className="mt-2">{footer}</div> : null}
+      </div>
     </div>
   );
 }
@@ -94,26 +112,27 @@ function ListenButton({
           ? `Stop reading reply ${turnIndex}`
           : `Listen to reply ${turnIndex}`
       }
-      className="min-h-12 border-2 border-bottle px-4 py-2 font-bold [overflow-wrap:anywhere] hover:bg-hivis"
+      className="min-h-12 border-2 border-bottle bg-white px-4 py-2 font-bold [overflow-wrap:anywhere] hover:bg-hivis"
     >
       {speaking ? "Stop" : "Listen"}
     </button>
   );
 }
 
-function availabilityHref(review: Review): string {
-  const date = tryLocalDateOf(review.start, review.timezone);
-  return date
-    ? `/?service=${encodeURIComponent(review.service.id)}&date=${date}#availability`
-    : "/#availability";
+/** Back to the assistant with the service and the local day of this review. Never the time. */
+function assistantAgainHref(review: Review): string {
+  return assistantHref({
+    service: review.service.id,
+    date: tryLocalDateOf(review.start, review.timezone),
+  });
 }
 
 function ReviewBlock({ review, live }: { review: Review; live: boolean }) {
-  const again = reviewHref(review.service.id, review.start);
+  const again = assistantAgainHref(review);
   return (
     <section
       aria-label="Booking review"
-      className="mt-3 max-w-2xl border-l-8 border-bottle bg-white p-4"
+      className="max-w-2xl border-2 border-l-8 border-bottle bg-white p-4 sm:ml-12"
     >
       <p className="font-bold">
         Review prepared by the schedule service — nothing is booked until you
@@ -126,7 +145,7 @@ function ReviewBlock({ review, live }: { review: Review; live: boolean }) {
         <ConfirmForm
           token={review.proposal_token}
           reviewHref={again}
-          availabilityHref={availabilityHref(review)}
+          availabilityHref={again}
         />
       ) : (
         <p className="mt-4">
@@ -149,6 +168,7 @@ function ReviewBlock({ review, live }: { review: Review; live: boolean }) {
 export function Transcript({
   turns,
   unsent = null,
+  thinking = false,
   readOnly = false,
   liveReviewTurn = null,
   focusTurn = null,
@@ -171,7 +191,7 @@ export function Transcript({
         const fromAssistant = response.reply.source === "assistant";
         const review = response.booking_review;
         return (
-          <li key={response.turn_index} className="space-y-3">
+          <li key={response.turn_index} className="space-y-4">
             <Message who="You" tone="user">
               {turn.message}
             </Message>
@@ -179,22 +199,24 @@ export function Transcript({
               data-focus-turn={response.turn_index}
               tabIndex={-1}
               id={`${idPrefix}-reply-${response.turn_index}`}
-              className="space-y-3"
+              className="space-y-4"
             >
               <Message
                 who={fromAssistant ? "Assistant (AI)" : "System"}
                 tone={fromAssistant ? "assistant" : "system"}
+                footer={
+                  fromAssistant && playback ? (
+                    <ListenButton
+                      turnIndex={response.turn_index}
+                      id={`${idPrefix}-${response.turn_index}`}
+                      text={response.reply.text}
+                      playback={playback}
+                    />
+                  ) : undefined
+                }
               >
                 {response.reply.text}
               </Message>
-              {fromAssistant && playback ? (
-                <ListenButton
-                  turnIndex={response.turn_index}
-                  id={`${idPrefix}-${response.turn_index}`}
-                  text={response.reply.text}
-                  playback={playback}
-                />
-              ) : null}
               {review ? (
                 <ReviewBlock
                   review={review}
@@ -206,10 +228,27 @@ export function Transcript({
         );
       })}
       {unsent ? (
-        <li>
+        <li className="space-y-4">
           <Message who="You (not answered yet)" tone="user">
             {unsent}
           </Message>
+          {thinking ? (
+            <div className="flex gap-3">
+              <Mark tone="assistant" />
+              <div className="border-2 border-moss bg-celeste/40 p-3">
+                <p className="text-sm font-bold">Assistant (AI)</p>
+                <p className="mt-1">
+                  Working on a reply
+                  <span
+                    aria-hidden="true"
+                    className="motion-safe:animate-pulse"
+                  >
+                    …
+                  </span>
+                </p>
+              </div>
+            </div>
+          ) : null}
         </li>
       ) : null}
     </ol>

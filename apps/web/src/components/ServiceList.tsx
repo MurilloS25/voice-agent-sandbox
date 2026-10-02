@@ -1,4 +1,7 @@
+import Link from "next/link";
+
 import type { Service } from "@/lib/api/client";
+import { assistantHref } from "@/lib/assistant-link";
 import { formatDuration, formatPrice } from "@/lib/format";
 
 export function ServiceList({ services }: { services: Service[] }) {
@@ -27,6 +30,13 @@ export function ServiceList({ services }: { services: Service[] }) {
               <div className="min-w-[min(100%,11rem)] flex-1">
                 <h3 className="text-xl font-bold">{service.name}</h3>
                 <p className="max-w-prose text-moss">{service.description}</p>
+                <Link
+                  href={assistantHref({ service: service.id })}
+                  className="mt-2 inline-flex min-h-12 items-center font-bold underline underline-offset-4"
+                >
+                  Ask the assistant about this
+                  <span className="sr-only">: {service.name}</span>
+                </Link>
               </div>
               <div className="ml-auto text-right">
                 <p className="font-display text-3xl leading-none font-extrabold">

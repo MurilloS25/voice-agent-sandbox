@@ -62,3 +62,14 @@ body {
     opacity: 0.55;
   }
 }
+
+/*
+ * On a tall enough window the assistant's message box sticks to the bottom. Keeping focus and
+ * anchors clear of it takes some bottom scroll padding. The query is in rem, so enlarged text
+ * switches both off together.
+ */
+@media (min-height: 44rem) {
+  html {
+    scroll-padding-bottom: 16rem;
+  }
+}

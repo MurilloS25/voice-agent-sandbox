@@ -139,10 +139,7 @@ describe("Transcript", () => {
     ).toHaveLength(1);
     expect(
       screen.getByRole("link", { name: "Review this time again" }),
-    ).toHaveAttribute(
-      "href",
-      expect.stringContaining("/book?service=flat-repair"),
-    );
+    ).toHaveAttribute("href", "/assistant?service=flat-repair&date=2026-10-01");
 
     rerender(
       <Transcript

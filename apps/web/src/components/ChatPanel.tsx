@@ -20,6 +20,7 @@ import {
 import { newUuid } from "@/lib/uuid";
 import { useSpeechOutput } from "@/lib/voice/use-speech-output";
 
+import { AssistantWelcome } from "./AssistantWelcome";
 import { ExecutionTimeline } from "./ExecutionTimeline";
 import { Transcript } from "./Transcript";
 import { SpokenReplies } from "./SpokenReplies";
@@ -38,12 +39,6 @@ type Phase =
     }
   | { kind: "unavailable" } // no assistant is configured
   | { kind: "ended"; reason: EndReason };
-
-const SUGGESTIONS = [
-  "What does the shop do?",
-  "How much is a flat repair?",
-  "Do you have time for a flat repair on Tuesday?",
-];
 
 const END_COPY: Record<EndReason, { title: string; body: string }> = {
   not_found: {
@@ -85,6 +80,8 @@ const RETRY_COPY = {
 
 const buttonClass =
   "min-h-12 bg-bottle px-6 py-2 text-lg font-bold [overflow-wrap:anywhere] text-primer hover:bg-moss disabled:opacity-60";
+const secondaryButtonClass =
+  "min-h-12 border-2 border-bottle bg-white px-4 py-2 font-bold [overflow-wrap:anywhere] hover:bg-hivis";
 const linkClass = "font-bold underline underline-offset-4";
 
 function Notice({
@@ -101,7 +98,7 @@ function Notice({
       ref={noticeRef}
       role="alert"
       tabIndex={-1}
-      className="max-w-prose border-l-8 border-rust bg-white/60 p-4"
+      className="max-w-prose border-2 border-l-8 border-rust bg-white p-4"
     >
       <p className="text-lg font-bold [overflow-wrap:anywhere] text-rust">
         {title}
@@ -137,11 +134,18 @@ function RetryButton({
   );
 }
 
-export function ChatPanel() {
+export function ChatPanel({ initialDraft = "" }: { initialDraft?: string }) {
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [turns, setTurns] = useState<Turn[]>([]);
   const [earlier, setEarlier] = useState<Conversation[]>([]);
-  const [draft, setDraft] = useState("");
+  const [draft, setDraft] = useState(initialDraft);
+  // A link that arrives while the page is open (for example "Review again") offers its draft
+  // too, but never over something the visitor already typed.
+  const [seenDraft, setSeenDraft] = useState(initialDraft);
+  if (initialDraft !== seenDraft) {
+    setSeenDraft(initialDraft);
+    if (draft === "") setDraft(initialDraft);
+  }
   const [pending, setPending] = useState<Pending | null>(null);
   const [phase, setPhase] = useState<Phase>({ kind: "idle", replied: false });
   const [focusTurn, setFocusTurn] = useState<number | null>(null);
@@ -150,6 +154,9 @@ export function ChatPanel() {
   // The merged transcript did not fit in 500 characters and its end was cut off.
   const [shortened, setShortened] = useState(false);
   const voice = useRef<VoiceControl>(null);
+  // A transcript is in the box and has not been sent yet; and which text it was.
+  const [reviewing, setReviewing] = useState(false);
+  const lastTranscript = useRef("");
 
   // Spoken replies. Both choices live in memory only and start off; refs mirror them for the
   // async code that reads them after a turn comes back.
@@ -223,8 +230,30 @@ export function ChatPanel() {
     box.setSelectionRange(box.value.length, box.value.length);
   }, [transcripts]);
 
+  /** A quick start fills the box and puts the cursor in it. Nothing is sent. */
+  function pickDraft(text: string) {
+    setDraft(text);
+    setShortened(false);
+    setPhase((current) =>
+      current.kind === "invalid" ? { kind: "idle", replied: false } : current,
+    );
+    textareaRef.current?.focus();
+  }
+
+  /** Recording again replaces the transcript from last time, if it was left as it was. */
+  function onRecordingStart() {
+    speech.stop();
+    const previous = lastTranscript.current;
+    lastTranscript.current = "";
+    const current = draft.trim();
+    if (previous && current.endsWith(previous)) {
+      setDraft(current.slice(0, current.length - previous.length).trim());
+    }
+  }
+
   /** The transcript joins what is already typed. It is never sent from here: only Send sends. */
   function addTranscript(text: string) {
+    lastTranscript.current = text.trim();
     const merged = [draft.trim(), text.trim()]
       .filter((part) => part.length > 0)
       .join(" ");
@@ -294,9 +323,10 @@ export function ChatPanel() {
     }
   }
 
-  function submit() {
+  function submit(afterUnavailable = false) {
     if (inFlight.current || pending) return;
-    if (phase.kind === "unavailable" || phase.kind === "ended") return;
+    if (phase.kind === "ended") return;
+    if (phase.kind === "unavailable" && !afterUnavailable) return;
     if (turns.length >= MAX_TURN_INDEX) {
       // The API ends a conversation after 30 turns; say so instead of sending turn 31.
       setPhase({ kind: "ended", reason: "limit" });
@@ -310,6 +340,7 @@ export function ChatPanel() {
     // Sending ends any recording or transcription that is still going: its text would arrive
     // after the box was cleared.
     voice.current?.cancel();
+    lastTranscript.current = "";
     speech.stop(); // a new turn silences the previous reply
     // The conversation id is made once, on the first submission, and then kept.
     const id = conversationId ?? newUuid();
@@ -322,6 +353,11 @@ export function ChatPanel() {
     };
     setPending(submission);
     void run(submission);
+  }
+
+  /** Sends the message that is still in the box, once more, after "not switched on". */
+  function tryAgain() {
+    submit(true);
   }
 
   function retry() {
@@ -358,6 +394,7 @@ export function ChatPanel() {
     }
   }
 
+  const transcriptReady = reviewing && draft.trim() !== "";
   const ended = phase.kind === "ended";
   const sending = phase.kind === "sending";
   const showComposer =
@@ -382,77 +419,14 @@ export function ChatPanel() {
         : "";
 
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)] gap-10 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)] lg:gap-14">
-      <section aria-labelledby="chat-heading" className="space-y-6">
-        <h2
-          id="chat-heading"
-          className="font-display text-4xl font-extrabold [overflow-wrap:anywhere] sm:text-5xl"
-        >
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)] lg:items-start lg:gap-10">
+      <section
+        aria-labelledby="chat-heading"
+        className="min-w-0 border-2 border-bottle bg-white/70"
+      >
+        <h2 id="chat-heading" className="sr-only">
           Conversation
         </h2>
-
-        {earlier.map((conversation, index) => (
-          <details key={index} className="border-l-4 border-moss pl-4">
-            <summary className="min-h-12 cursor-pointer py-2 font-bold [overflow-wrap:anywhere]">
-              Earlier conversation, read-only ({conversation.turns.length}{" "}
-              {conversation.turns.length === 1 ? "turn" : "turns"})
-            </summary>
-            <div className="mt-3">
-              <Transcript
-                turns={conversation.turns}
-                unsent={conversation.unsent}
-                readOnly
-                idPrefix={`earlier-${index}`}
-              />
-            </div>
-          </details>
-        ))}
-
-        {turns.length === 0 && !showSending && !unsent ? (
-          <div className="max-w-prose space-y-3">
-            <p>
-              Ask about services, prices, opening hours or open times. The
-              assistant is an AI. It can prepare a booking review for a time the
-              shop offers, but only you can confirm one.
-            </p>
-            <p className="font-bold">Try asking</p>
-            <ul className="flex flex-wrap gap-3">
-              {SUGGESTIONS.map((suggestion) => (
-                <li key={suggestion}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setDraft(suggestion);
-                      textareaRef.current?.focus();
-                    }}
-                    disabled={sending || phase.kind === "unavailable"}
-                    className="min-h-12 border-2 border-bottle bg-white px-4 py-2 text-left [overflow-wrap:anywhere] hover:bg-hivis"
-                  >
-                    {suggestion}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
-        ) : (
-          <Transcript
-            turns={turns}
-            unsent={showSending ?? unsent}
-            readOnly={ended}
-            liveReviewTurn={liveReviewTurn}
-            focusTurn={focusTurn}
-            idPrefix="current"
-            playback={
-              speechState.supported && speechState.choice.kind !== "none"
-                ? {
-                    speakingId: speechState.speakingId,
-                    onListen: (id, text) => speakReply(id, text, false),
-                    onStop: () => speech.stop(),
-                  }
-                : undefined
-            }
-          />
-        )}
 
         <SpokenReplies
           snapshot={speechState}
@@ -471,66 +445,120 @@ export function ChatPanel() {
           note={speechNote}
         />
 
-        {phase.kind === "retry" ? (
-          <Notice title={RETRY_COPY[phase.reason].title} noticeRef={noticeRef}>
-            <p>{RETRY_COPY[phase.reason].body}</p>
-            <div className="flex flex-wrap items-center gap-4">
-              <RetryButton
-                key={phase.attempt}
-                retryAfterS={phase.retryAfterS}
-                onRetry={retry}
-              />
+        <div className="space-y-6 p-4 sm:p-6">
+          {earlier.map((conversation, index) => (
+            <details key={index} className="border-l-4 border-moss pl-4">
+              <summary className="min-h-12 cursor-pointer py-2 font-bold [overflow-wrap:anywhere]">
+                Earlier conversation, read-only ({conversation.turns.length}{" "}
+                {conversation.turns.length === 1 ? "turn" : "turns"})
+              </summary>
+              <div className="mt-3">
+                <Transcript
+                  turns={conversation.turns}
+                  unsent={conversation.unsent}
+                  readOnly
+                  idPrefix={`earlier-${index}`}
+                />
+              </div>
+            </details>
+          ))}
+
+          <AssistantWelcome
+            onPick={pickDraft}
+            showActions={turns.length === 0 && !showSending && !unsent}
+            disabled={sending || phase.kind === "unavailable"}
+          />
+
+          {turns.length > 0 || showSending || unsent ? (
+            <Transcript
+              turns={turns}
+              unsent={showSending ?? unsent}
+              thinking={showSending !== null}
+              readOnly={ended}
+              liveReviewTurn={liveReviewTurn}
+              focusTurn={focusTurn}
+              idPrefix="current"
+              playback={
+                speechState.supported && speechState.choice.kind !== "none"
+                  ? {
+                      speakingId: speechState.speakingId,
+                      onListen: (id, text) => speakReply(id, text, false),
+                      onStop: () => speech.stop(),
+                    }
+                  : undefined
+              }
+            />
+          ) : null}
+
+          {phase.kind === "retry" ? (
+            <Notice
+              title={RETRY_COPY[phase.reason].title}
+              noticeRef={noticeRef}
+            >
+              <p>{RETRY_COPY[phase.reason].body}</p>
+              <div className="flex flex-wrap items-center gap-4">
+                <RetryButton
+                  key={phase.attempt}
+                  retryAfterS={phase.retryAfterS}
+                  onRetry={retry}
+                />
+                <button
+                  type="button"
+                  onClick={startNewConversation}
+                  className={secondaryButtonClass}
+                >
+                  Start a new conversation
+                </button>
+              </div>
+            </Notice>
+          ) : null}
+
+          {phase.kind === "ended" ? (
+            <Notice title={END_COPY[phase.reason].title} noticeRef={noticeRef}>
+              <p>
+                {END_COPY[phase.reason].body} Your messages stay on this page,
+                read-only.
+              </p>
               <button
                 type="button"
                 onClick={startNewConversation}
-                className="min-h-12 border-2 border-bottle px-4 py-2 font-bold [overflow-wrap:anywhere] hover:bg-hivis"
+                className={buttonClass}
               >
                 Start a new conversation
               </button>
-            </div>
-            <p>
-              <Link href="/#availability" className={linkClass}>
-                Book with the form instead
-              </Link>
-            </p>
-          </Notice>
-        ) : null}
+            </Notice>
+          ) : null}
 
-        {phase.kind === "ended" ? (
-          <Notice title={END_COPY[phase.reason].title} noticeRef={noticeRef}>
-            <p>
-              {END_COPY[phase.reason].body} Your messages stay on this page,
-              read-only.
-            </p>
-            <button
-              type="button"
-              onClick={startNewConversation}
-              className={buttonClass}
+          {phase.kind === "unavailable" ? (
+            <Notice
+              title="The assistant isn't switched on"
+              noticeRef={noticeRef}
             >
-              Start a new conversation
-            </button>
-          </Notice>
-        ) : null}
+              <p>
+                This demo has no assistant connected right now. Try again in a
+                moment, or go back to the workshop page.
+              </p>
+              <div className="flex flex-wrap items-center gap-4">
+                <button
+                  type="button"
+                  onClick={tryAgain}
+                  className={buttonClass}
+                >
+                  Try again
+                </button>
+                <Link href="/" className={linkClass}>
+                  Back to workshop
+                </Link>
+              </div>
+            </Notice>
+          ) : null}
 
-        {phase.kind === "unavailable" ? (
-          <Notice title="The assistant isn't switched on" noticeRef={noticeRef}>
-            <p>
-              This demo has no assistant connected right now. You can still book
-              with the form.
-            </p>
-            <p>
-              <Link href="/#availability" className={linkClass}>
-                Book with the form instead
-              </Link>
-            </p>
-          </Notice>
-        ) : null}
-
-        {phase.kind === "rejected" ? (
-          <Notice title="That message wasn't accepted" noticeRef={noticeRef}>
-            <p>Check the message and send it again.</p>
-          </Notice>
-        ) : null}
+          {phase.kind === "rejected" ? (
+            <Notice title="That message wasn't accepted" noticeRef={noticeRef}>
+              <p>Check the message and send it again.</p>
+            </Notice>
+          ) : null}
+        </div>
 
         {showComposer ? (
           <form
@@ -538,16 +566,22 @@ export function ChatPanel() {
               event.preventDefault();
               submit();
             }}
-            className="max-w-2xl"
+            className="z-10 border-t-2 border-bottle bg-primer px-4 py-3 sm:px-6 [@media(min-height:44rem)]:sticky [@media(min-height:44rem)]:bottom-0"
           >
-            <label htmlFor="message" className="font-bold">
+            <label htmlFor="message" className="text-sm font-bold">
               Your message
             </label>
+            {draft !== "" && draft === initialDraft && turns.length === 0 ? (
+              <p className="text-sm">
+                Prepared from the page you came from. Change it or send it as it
+                is.
+              </p>
+            ) : null}
             <textarea
               id="message"
               name="message"
               ref={textareaRef}
-              rows={3}
+              rows={2}
               maxLength={MAX_MESSAGE_LENGTH}
               value={draft}
               readOnly={sending}
@@ -561,15 +595,17 @@ export function ChatPanel() {
               onKeyDown={onKeyDown}
               aria-describedby="message-help message-count"
               aria-invalid={phase.kind === "invalid" || undefined}
-              className="mt-1 block w-full border-2 border-bottle bg-white px-3 py-2 text-lg"
+              className="mt-1 block w-full resize-y border-2 border-bottle bg-white px-3 py-2 text-lg"
             />
-            <p id="message-help" className="mt-1 text-sm">
-              Press Enter to send, or Shift and Enter for a new line. Plain text
-              only, and please don&apos;t type personal details.
-            </p>
-            <p id="message-count" className="text-sm">
-              {draft.length} of {MAX_MESSAGE_LENGTH} characters
-            </p>
+            <div className="mt-1 flex flex-wrap justify-between gap-x-4 text-sm">
+              <p id="message-help">
+                Enter sends, Shift and Enter adds a line. Plain text only, and
+                please don&apos;t type personal details.
+              </p>
+              <p id="message-count">
+                {draft.length} of {MAX_MESSAGE_LENGTH} characters
+              </p>
+            </div>
             {shortened ? (
               <p role="status" className="text-sm font-bold">
                 The transcript was shortened to fit {MAX_MESSAGE_LENGTH}{" "}
@@ -581,36 +617,43 @@ export function ChatPanel() {
                 role="alert"
                 tabIndex={-1}
                 ref={noticeRef}
-                className="mt-2 border-l-8 border-rust bg-white/60 p-2 font-bold text-rust"
+                className="mt-2 border-l-8 border-rust bg-white p-2 font-bold text-rust"
               >
                 Write a message of 1 to {MAX_MESSAGE_LENGTH} characters.
               </div>
             ) : null}
-            <VoiceInput
-              controlRef={voice}
-              onRecordingStart={() => speech.stop()}
-              onTranscript={addTranscript}
-              disabled={sending || phase.kind === "unavailable"}
-            />
-            <div className="mt-3 flex flex-wrap items-center gap-4">
+            <div className="mt-3 flex flex-wrap items-start gap-x-4 gap-y-3">
+              <VoiceInput
+                controlRef={voice}
+                onRecordingStart={onRecordingStart}
+                onTranscript={addTranscript}
+                onReviewChange={setReviewing}
+                disabled={sending || phase.kind === "unavailable"}
+              />
               <button
                 type="submit"
                 disabled={sending || phase.kind === "unavailable"}
                 aria-busy={sending}
-                className={buttonClass}
+                className={`${buttonClass} ml-auto`}
               >
-                {sending ? "Sending…" : "Send message"}
+                {sending
+                  ? "Sending…"
+                  : transcriptReady
+                    ? "Send transcript"
+                    : "Send message"}
               </button>
-              {turns.length > 0 && !sending ? (
+            </div>
+            {turns.length > 0 && !sending ? (
+              <p className="mt-2">
                 <button
                   type="button"
                   onClick={startNewConversation}
-                  className="min-h-12 border-2 border-bottle px-4 py-2 font-bold [overflow-wrap:anywhere] hover:bg-hivis"
+                  className="min-h-12 font-bold underline underline-offset-4"
                 >
                   Start a new conversation
                 </button>
-              ) : null}
-            </div>
+              </p>
+            ) : null}
           </form>
         ) : null}
 
@@ -619,10 +662,13 @@ export function ChatPanel() {
         </p>
       </section>
 
-      <aside aria-label="Execution timeline" className="min-w-0">
-        <details ref={timelineRef} className="border-t-4 border-bottle pt-4">
-          <summary className="min-h-12 cursor-pointer font-display text-3xl font-extrabold [overflow-wrap:anywhere]">
-            Execution timeline
+      <aside aria-label="How this answer was made" className="min-w-0">
+        <details
+          ref={timelineRef}
+          className="border-2 border-bottle bg-white/70 p-4"
+        >
+          <summary className="min-h-12 cursor-pointer font-display text-2xl font-extrabold [overflow-wrap:anywhere]">
+            How this answer was made
           </summary>
           <div className="mt-4">
             <p className="mb-4 max-w-prose">

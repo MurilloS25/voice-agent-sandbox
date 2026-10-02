@@ -8,6 +8,7 @@ import { fakeVoice, installSpeech, type FakeSynth } from "@/test/speech-fakes";
 import { installMedia, type FakeMedia } from "@/test/voice-fakes";
 import { resetSpeechOutput } from "@/lib/voice/use-speech-output";
 
+import { QUICK_ACTIONS, WELCOME_TEXT } from "./AssistantWelcome";
 import { ChatPanel } from "./ChatPanel";
 
 const { sendTurn, uuid } = vi.hoisted(() => ({
@@ -75,27 +76,28 @@ describe("ChatPanel: the empty conversation", () => {
     expect(
       screen.getByRole("heading", { name: "Conversation" }),
     ).toBeInTheDocument();
-    expect(screen.getByText(/The assistant is an AI/)).toBeInTheDocument();
+    expect(screen.getByText(WELCOME_TEXT)).toBeInTheDocument();
     expect(box()).toHaveAttribute("maxlength", "500");
     expect(screen.getByText("0 of 500 characters")).toBeInTheDocument();
-    expect(screen.getByText(/Press Enter to send/)).toBeInTheDocument();
+    expect(screen.getByText(/Enter sends/)).toBeInTheDocument();
     expect(document.body).toHaveFocus();
     expect(sendTurn).not.toHaveBeenCalled();
     expect(
-      screen.getByRole("complementary", { name: "Execution timeline" }),
+      screen.getByRole("complementary", { name: "How this answer was made" }),
     ).toBeInTheDocument();
     expect(screen.getByText(/Nothing yet/)).toBeInTheDocument();
   });
 
-  it("fills the composer from a suggestion without sending it", () => {
-    render(<ChatPanel />);
-    fireEvent.click(
-      screen.getByRole("button", { name: "What does the shop do?" }),
-    );
-    expect(box()).toHaveValue("What does the shop do?");
-    expect(box()).toHaveFocus();
-    expect(sendTurn).not.toHaveBeenCalled();
-  });
+  it.each(QUICK_ACTIONS)(
+    "fills the composer from the quick start $label without sending it",
+    (action) => {
+      render(<ChatPanel />);
+      fireEvent.click(screen.getByRole("button", { name: action.label }));
+      expect(box()).toHaveValue(action.draft);
+      expect(box()).toHaveFocus();
+      expect(sendTurn).not.toHaveBeenCalled();
+    },
+  );
 
   it("counts characters", () => {
     render(<ChatPanel />);
@@ -124,7 +126,8 @@ describe("ChatPanel: sending", () => {
     await send("What do you do?");
 
     expect(screen.getByText("You")).toBeInTheDocument();
-    expect(screen.getByText("Assistant (AI)")).toBeInTheDocument();
+    const reply = document.getElementById("current-reply-1") as HTMLElement;
+    expect(within(reply).getByText("Assistant (AI)")).toBeInTheDocument();
     expect(screen.getByText("Answer to: What do you do?")).toBeInTheDocument();
     expect(box()).toHaveValue("");
     expect(screen.getByRole("status")).toHaveTextContent(
@@ -363,8 +366,8 @@ describe("ChatPanel: ways out", () => {
       within(alert).getByRole("button", { name: "Try again" }),
     ).toBeEnabled();
     expect(
-      within(alert).getByRole("link", { name: "Book with the form instead" }),
-    ).toHaveAttribute("href", "/#availability");
+      screen.queryByRole("link", { name: /form instead/ }),
+    ).not.toBeInTheDocument();
 
     await act(async () => {
       fireEvent.click(
@@ -421,7 +424,7 @@ describe("ChatPanel: ways out", () => {
 });
 
 describe("ChatPanel: the assistant is not available", () => {
-  it("explains it and links to the booking form", async () => {
+  it("offers Try again and Back to workshop, never the manual form", async () => {
     sendTurn.mockResolvedValueOnce({ kind: "agent_unavailable" });
     render(<ChatPanel />);
     await send("hello");
@@ -430,8 +433,15 @@ describe("ChatPanel: the assistant is not available", () => {
     expect(alert).toHaveTextContent("The assistant isn't switched on");
     expect(alert).toHaveFocus();
     expect(
-      within(alert).getByRole("link", { name: "Book with the form instead" }),
-    ).toHaveAttribute("href", "/#availability");
+      within(alert).getByRole("link", { name: "Back to workshop" }),
+    ).toHaveAttribute("href", "/");
+    expect(
+      within(alert).getByRole("button", { name: "Try again" }),
+    ).toBeEnabled();
+    expect(
+      screen.queryByRole("link", { name: /form instead/ }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText(/with the form/)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
     expect(box()).toHaveValue("hello"); // nothing the visitor wrote is lost
   });
@@ -549,8 +559,9 @@ describe("ChatPanel: degraded answers and reviews", () => {
     render(<ChatPanel />);
     await send("hello");
 
-    expect(screen.getByText("System")).toBeInTheDocument();
-    expect(screen.queryByText("Assistant (AI)")).not.toBeInTheDocument();
+    const reply = document.getElementById("current-reply-1") as HTMLElement;
+    expect(within(reply).getByText("System")).toBeInTheDocument();
+    expect(within(reply).queryByText("Assistant (AI)")).not.toBeInTheDocument();
     expect(
       screen.getByText("The assistant took too long to answer."),
     ).toBeInTheDocument();
@@ -809,7 +820,7 @@ describe("ChatPanel: voice input", () => {
     type("Do you have time for a tune-up on Friday?");
     expect(sendTurn).not.toHaveBeenCalled();
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+      fireEvent.click(screen.getByRole("button", { name: "Send transcript" }));
     });
 
     expect(submissions().map((s) => s.message)).toEqual([
