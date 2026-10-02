@@ -7,6 +7,7 @@ import { resetSpeechOutput } from "@/lib/voice/use-speech-output";
 import { expectNoA11yViolations } from "@/test/axe";
 import { agentTurn, proposal, reviewTurn } from "@/test/fixtures";
 import { fakeVoice, installSpeech, type FakeSynth } from "@/test/speech-fakes";
+import { FakeAudioContext, installAudio } from "@/test/audio-fakes";
 import { installMedia, type FakeMedia } from "@/test/voice-fakes";
 
 import { VOICE_READY_TEXT, WELCOME_TEXT } from "./AssistantWelcome";
@@ -1337,5 +1338,696 @@ describe("accessibility", () => {
         (control as HTMLInputElement).labels?.[0]?.textContent;
       expect(name).toBeTruthy();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Automatic sending (the default), the short start, network-voice agreement and the live orb.
+// ---------------------------------------------------------------------------------------------
+
+const NET_A = fakeVoice({ name: "Net Alpha", localService: false });
+const NET_B = fakeVoice({ name: "Net Beta", localService: false });
+
+function jsonResponse(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+}
+
+/** Records a clip and stops it; the transcription is whatever the fetch mock answers. */
+async function recordAndStop() {
+  await press("Tap to speak");
+  await screen.findByRole("button", { name: "Stop" });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1000);
+  });
+  await press("Stop");
+}
+
+/** Holds the transcription request until the test lets it finish. */
+function holdTranscription() {
+  let finish: (response: Response) => void = () => undefined;
+  fetchMock.mockImplementation((url: string) =>
+    String(url).includes("probe=1")
+      ? Promise.resolve(jsonResponse({ available: true }))
+      : new Promise<Response>((resolve) => {
+          finish = resolve;
+        }),
+  );
+  return {
+    finish: async (text: string) => {
+      await act(async () => {
+        finish(jsonResponse({ text }));
+      });
+    },
+  };
+}
+
+function holdTurn() {
+  let finish: (outcome: TurnOutcome) => void = () => undefined;
+  sendTurn.mockImplementation(
+    () =>
+      new Promise<TurnOutcome>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  return {
+    finish: async () => {
+      const outcome = await answer(submissions()[0]);
+      await act(async () => {
+        finish(outcome);
+      });
+    },
+  };
+}
+
+describe("automatic sending (the default)", () => {
+  it("is on by default: Review transcript before sending starts off", () => {
+    setup({ review: false });
+    fireEvent.click(screen.getByRole("button", { name: "Voice settings" }));
+    expect(
+      screen.getByRole("checkbox", {
+        name: "Review transcript before sending",
+      }),
+    ).not.toBeChecked();
+  });
+
+  it("goes from Transcribing straight to Thinking and sends the heard sentence as the next turn, with no editor and no Send", async () => {
+    const held = holdTranscription();
+    const turn = holdTurn();
+    setup({ review: false });
+    await startSession();
+
+    await recordAndStop();
+    await vi.waitFor(() => expect(status()).toHaveTextContent("Transcribing"));
+    expect(screen.getByText(/sent as soon as it is ready/)).toBeInTheDocument();
+    expect(sendTurn).not.toHaveBeenCalled();
+
+    await held.finish("when are you open on Tuesday");
+    expect(status()).toHaveTextContent("Thinking");
+    expect(
+      screen.queryByLabelText("What I heard (you can edit it)"),
+    ).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Send what I said" }),
+    ).toBeNull();
+    expect(submissions()).toHaveLength(1);
+    expect(submissions()[0]).toMatchObject({
+      turnIndex: 1,
+      message: "when are you open on Tuesday",
+    });
+    // The visitor sees what was heard, briefly, as context for the wait.
+    expect(screen.getByText(/You said:/).parentElement).toHaveTextContent(
+      "when are you open on Tuesday",
+    );
+    expect(screen.getByText(/I heard you and sent it/)).toBeInTheDocument();
+
+    await turn.finish();
+    expect(status()).toHaveTextContent("Speaking");
+    expect(synth.texts.at(-1)).toBe("Answer to: when are you open on Tuesday");
+    browserStartsSpeaking();
+    browserFinishesSpeaking();
+    expect(status()).toHaveTextContent("Ready");
+  });
+
+  it("reads the new reply once, and never a second one for the same turn", async () => {
+    setup({ review: false });
+    await startSession();
+    await recordAndStop();
+    await screen.findByText(/Answer to: first take/);
+    browserStartsSpeaking();
+    fireEvent.click(screen.getByRole("button", { name: "View transcript" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close transcript" }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000);
+    });
+    expect(
+      synth.texts.filter((text) => text === "Answer to: first take"),
+    ).toHaveLength(1);
+    expect(submissions()).toHaveLength(1); // and it was sent once
+  });
+
+  it("blocks a second recording while the turn is in progress", async () => {
+    const turn = holdTurn();
+    setup({ review: false });
+    await startSession();
+    await recordAndStop();
+    await vi.waitFor(() => expect(status()).toHaveTextContent("Thinking"));
+    const asked = media.getUserMedia.mock.calls.length;
+    fireEvent.click(screen.getByRole("button", { name: "Please wait" }));
+    expect(media.getUserMedia.mock.calls.length).toBe(asked);
+    expect(screen.queryByRole("button", { name: "Tap to speak" })).toBeNull();
+    await turn.finish();
+    expect(submissions()).toHaveLength(1);
+  });
+
+  it("never confirms a booking: the review appears and Confirm booking waits for a press", async () => {
+    sendTurn.mockImplementation(async (p: Pending) => ({
+      kind: "ok",
+      turn: reviewTurn(p.turnIndex),
+    }));
+    setup({ review: false });
+    await startSession();
+    await recordAndStop();
+    const confirm = await screen.findByRole("button", {
+      name: "Confirm booking",
+    });
+    expect(confirm).toBeEnabled();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    expect(confirmBooking).not.toHaveBeenCalled();
+  });
+
+  it("does not send an empty transcript", async () => {
+    fetchMock.mockImplementation((url: string) =>
+      Promise.resolve(
+        jsonResponse(
+          String(url).includes("probe=1")
+            ? { available: true }
+            : { text: "   " },
+        ),
+      ),
+    );
+    setup({ review: false });
+    await startSession();
+    await recordAndStop();
+    await vi.waitFor(() =>
+      expect(screen.getByText(/I didn't hear anything/)).toBeInTheDocument(),
+    );
+    expect(sendTurn).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("button", { name: "Tap to speak" }),
+    ).toBeInTheDocument();
+  });
+
+  it("does not send when the transcription fails", async () => {
+    fetchMock.mockImplementation((url: string) =>
+      Promise.resolve(
+        String(url).includes("probe=1")
+          ? jsonResponse({ available: true })
+          : jsonResponse({ error: "no_speech" }, 422),
+      ),
+    );
+    setup({ review: false });
+    await startSession();
+    await recordAndStop();
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "No speech was found",
+    );
+    expect(sendTurn).not.toHaveBeenCalled();
+  });
+
+  it("does not send a recording that was cancelled, while recording or while transcribing", async () => {
+    const held = holdTranscription();
+    setup({ review: false });
+    await startSession();
+
+    await press("Tap to speak");
+    await screen.findByRole("button", { name: "Stop" });
+    await press("Cancel recording");
+    expect(sendTurn).not.toHaveBeenCalled();
+
+    await recordAndStop();
+    await vi.waitFor(() => expect(status()).toHaveTextContent("Transcribing"));
+    await press("Cancel transcription");
+    await held.finish("too late");
+    expect(sendTurn).not.toHaveBeenCalled();
+    expect(status()).toHaveTextContent("Ready");
+  });
+
+  it("does not send if the voice session ended before the transcription finished", async () => {
+    const held = holdTranscription();
+    setup({ review: false });
+    await startSession();
+    await recordAndStop();
+    await vi.waitFor(() => expect(status()).toHaveTextContent("Transcribing"));
+    await press("End voice session");
+    await held.finish("too late");
+    expect(sendTurn).not.toHaveBeenCalled();
+  });
+
+  it("does not send if the visitor moved to Text during Listening or Transcribing", async () => {
+    const held = holdTranscription();
+    setup({ review: false });
+    await startSession();
+
+    await press("Tap to speak");
+    await screen.findByRole("button", { name: "Stop" });
+    await press("Text");
+    expect(media.streams.every((stream) => stream.allStopped)).toBe(true);
+    expect(sendTurn).not.toHaveBeenCalled();
+
+    await press("Voice");
+    await startSession();
+    await recordAndStop();
+    await vi.waitFor(() => expect(status()).toHaveTextContent("Transcribing"));
+    await press("Text");
+    await held.finish("too late");
+    expect(sendTurn).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Your message")).toHaveValue("");
+  });
+
+  it("lets a turn that was already sent finish in Text, shows its reply, and does not read it", async () => {
+    const turn = holdTurn();
+    setup({ review: false });
+    await startSession();
+    await recordAndStop();
+    await vi.waitFor(() => expect(status()).toHaveTextContent("Thinking"));
+    await press("Text");
+    const cancelled = synth.cancelCount;
+
+    await turn.finish();
+
+    expect(
+      await screen.findByText("Answer to: first take"),
+    ).toBeInTheDocument();
+    expect(synth.texts).toEqual([WELCOME_TEXT]); // the welcome only: the reply is not read
+    expect(synth.cancelCount).toBeGreaterThanOrEqual(cancelled);
+    // Back in Voice the session must be started again, and nothing old is read.
+    await press("Voice");
+    expect(
+      screen.getByRole("button", { name: "Start voice assistant" }),
+    ).toBeInTheDocument();
+    await press("Start voice assistant");
+    expect(synth.texts).toEqual([WELCOME_TEXT, VOICE_READY_TEXT]);
+  });
+
+  it("keeps a message typed in Text safe: the transcript goes to the review instead of replacing it", async () => {
+    setup({ initialMode: "text", review: false });
+    fireEvent.change(screen.getByLabelText("Your message"), {
+      target: { value: "half a thought" },
+    });
+    await press("Voice");
+    await startSession();
+    await recordAndStop();
+    await vi.waitFor(() => expect(heardBox().value).toContain("first take"));
+    expect(heardBox().value).toContain("half a thought");
+    expect(sendTurn).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the review when the heard text cannot be sent (too long)", async () => {
+    fetchMock.mockImplementation((url: string) =>
+      Promise.resolve(
+        jsonResponse(
+          String(url).includes("probe=1")
+            ? { available: true }
+            : { text: "word ".repeat(120) },
+        ),
+      ),
+    );
+    setup({ review: false });
+    await startSession();
+    await recordAndStop();
+    await vi.waitFor(() => expect(heardBox()).toBeInTheDocument());
+    expect(sendTurn).not.toHaveBeenCalled();
+  });
+});
+
+describe("Review transcript before sending", () => {
+  it("turned on, keeps the manual review exactly: edit, Send what I said, no auto-send", async () => {
+    setup({ review: false });
+    fireEvent.click(screen.getByRole("button", { name: "Voice settings" }));
+    fireEvent.click(
+      screen.getByRole("checkbox", {
+        name: "Review transcript before sending",
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Close voice settings" }),
+    );
+    expect(
+      JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? "{}")
+        .reviewBeforeSending,
+    ).toBe(true);
+
+    await startSession();
+    await recordUntilReview("first take");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(8000);
+    });
+    expect(sendTurn).not.toHaveBeenCalled();
+    fireEvent.change(heardBox(), { target: { value: "edited" } });
+    await press("Send what I said");
+    expect(submissions().map((s) => s.message)).toEqual(["edited"]);
+  });
+
+  it("is remembered with the other voice preferences and contains no conversation", async () => {
+    setup({ review: false });
+    await startSession();
+    await recordAndStop();
+    await screen.findByText(/Answer to: first take/);
+    fireEvent.click(screen.getByRole("button", { name: "Voice settings" }));
+    fireEvent.click(
+      screen.getByRole("checkbox", {
+        name: "Review transcript before sending",
+      }),
+    );
+    const stored = localStorage.getItem(SETTINGS_KEY) ?? "";
+    expect(Object.keys(JSON.parse(stored)).sort()).toEqual([
+      "consentVoice",
+      "rate",
+      "reviewBeforeSending",
+      "voiceName",
+    ]);
+    expect(stored).not.toContain("first take");
+  });
+
+  it.each([
+    ["a string", '{"reviewBeforeSending":"true"}'],
+    ["a number", '{"reviewBeforeSending":1}'],
+    ["not JSON", "{{"],
+  ])(
+    "treats %s as the default, which is automatic sending",
+    async (_label, raw) => {
+      localStorage.setItem(SETTINGS_KEY, raw);
+      setup({ review: false });
+      await startSession();
+      await recordAndStop();
+      await screen.findByText(/Answer to: first take/);
+      expect(submissions()).toHaveLength(1);
+    },
+  );
+
+  it("sends nothing about the preference to the server", async () => {
+    setup({ review: false });
+    fireEvent.click(screen.getByRole("button", { name: "Voice settings" }));
+    fireEvent.click(
+      screen.getByRole("checkbox", {
+        name: "Review transcript before sending",
+      }),
+    );
+    fireEvent.change(screen.getByLabelText("Voice"), { target: { value: "" } });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(sendTurn).not.toHaveBeenCalled();
+  });
+});
+
+describe("Start voice assistant in a conversation that already has messages", () => {
+  it("says only that voice mode is ready: no new introduction, no history, no turn", async () => {
+    setup({ initialMode: "text", review: false });
+    fireEvent.change(screen.getByLabelText("Your message"), {
+      target: { value: "hello" },
+    });
+    await press("Send message");
+    await screen.findByText(/Answer to: hello/);
+    const ids = uuid.calls;
+    const turns = sendTurn.mock.calls.length;
+
+    await press("Voice");
+    await press("Start voice assistant");
+
+    expect(synth.texts).toEqual([VOICE_READY_TEXT]);
+    expect(spoken()).not.toContain("hello");
+    expect(spoken()).not.toContain("workshop assistant");
+    expect(sendTurn.mock.calls.length).toBe(turns);
+    expect(uuid.calls).toBe(ids);
+    expect(media.getUserMedia).not.toHaveBeenCalled();
+  });
+
+  it("keeps reading future replies after the short start", async () => {
+    setup({ initialMode: "text", review: false });
+    fireEvent.change(screen.getByLabelText("Your message"), {
+      target: { value: "hello" },
+    });
+    await press("Send message");
+    await screen.findByText(/Answer to: hello/);
+    await press("Voice");
+    await startSession();
+    await recordAndStop();
+    await screen.findByText(/Answer to: first take/);
+    expect(synth.texts).toEqual([VOICE_READY_TEXT, "Answer to: first take"]);
+  });
+
+  it("uses the full introduction for an empty conversation, and counts a welcome-only conversation as empty", async () => {
+    setup({ review: false });
+    await startSession();
+    expect(synth.texts).toEqual([WELCOME_TEXT]);
+    await press("End voice session");
+    await press("Start voice assistant");
+    expect(synth.texts).toEqual([WELCOME_TEXT, WELCOME_TEXT]);
+    expect(sendTurn).not.toHaveBeenCalled();
+  });
+
+  it("does not show the whole history on the voice stage, only the latest exchange", async () => {
+    setup({ review: false });
+    await startSession();
+    await recordAndStop();
+    await screen.findByText(/Answer to: first take/);
+    browserStartsSpeaking();
+    browserFinishesSpeaking();
+    await recordAndStop();
+    await screen.findByText(/Answer to: second take/);
+    const stage = screen.getByRole("region", { name: "Voice assistant" });
+    expect(within(stage).queryByText(/Answer to: first take/)).toBeNull();
+    expect(within(stage).queryByText(/first take/)).toBeNull();
+    expect(
+      within(stage).getByText(/Answer to: second take/),
+    ).toBeInTheDocument();
+    // The whole conversation is one press away.
+    fireEvent.click(screen.getByRole("button", { name: "View transcript" }));
+    const panel = screen.getByRole("complementary", { name: "Transcript" });
+    expect(within(panel).getByText("first take")).toBeInTheDocument();
+    expect(within(panel).getByText("second take")).toBeInTheDocument();
+  });
+
+  it("does not announce the same messages twice while the transcript is open", async () => {
+    setup({ review: false });
+    await startSession();
+    await recordAndStop();
+    await screen.findByText(/Answer to: first take/);
+    const card = () =>
+      screen.getByLabelText("Latest exchange", { selector: "section" });
+    expect(card()).not.toHaveAttribute("aria-hidden");
+    fireEvent.click(screen.getByRole("button", { name: "View transcript" }));
+    expect(
+      document.querySelector('section[aria-label="Latest exchange"]'),
+    ).toHaveAttribute("aria-hidden", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Close transcript" }));
+    expect(card()).not.toHaveAttribute("aria-hidden");
+  });
+
+  it("shows the booking review once, not on the stage and again in the transcript", async () => {
+    sendTurn.mockImplementation(async (p: Pending) => ({
+      kind: "ok",
+      turn: reviewTurn(p.turnIndex),
+    }));
+    const { container } = setup({ review: false });
+    await startSession();
+    await recordAndStop();
+    await screen.findByRole("button", { name: "Confirm booking" });
+    fireEvent.click(screen.getByRole("button", { name: "View transcript" }));
+    expect(
+      screen.getAllByRole("button", { name: "Confirm booking" }),
+    ).toHaveLength(1);
+    expect(
+      container.querySelectorAll('input[name="proposal_token"]'),
+    ).toHaveLength(1);
+  });
+});
+
+describe("leaving Voice for Text", () => {
+  it("ends the session, silences speech and keeps the conversation and the review", async () => {
+    sendTurn.mockImplementation(async (p: Pending) => ({
+      kind: "ok",
+      turn: reviewTurn(p.turnIndex),
+    }));
+    setup({ review: false });
+    await startSession();
+    await recordAndStop();
+    await screen.findByRole("button", { name: "Confirm booking" });
+    const cancelled = synth.cancelCount;
+
+    await press("Text");
+
+    expect(synth.cancelCount).toBeGreaterThan(cancelled);
+    expect(
+      screen.getByRole("button", { name: "Confirm booking" }),
+    ).toBeEnabled();
+    expect(screen.getByText("first take")).toBeInTheDocument();
+    await press("Voice");
+    expect(
+      screen.getByRole("button", { name: "Start voice assistant" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Confirm booking" }),
+    ).toBeEnabled();
+  });
+});
+
+describe("network voices", () => {
+  const open = () =>
+    fireEvent.click(screen.getByRole("button", { name: "Voice settings" }));
+  const pick = (name: string) =>
+    fireEvent.change(screen.getByLabelText("Voice"), {
+      target: { value: name },
+    });
+
+  it("explains what a network voice is, in plain words, without naming a provider's data practices", () => {
+    setup({ voices: [LOCAL, NET_A], review: false });
+    open();
+    pick("Net Alpha");
+    expect(
+      screen.getByText(
+        /A network voice may send the text to your browser’s voice provider to generate audio\. It requires an internet connection\./,
+      ),
+    ).toBeInTheDocument();
+    const text = document.body.textContent ?? "";
+    expect(text).not.toMatch(/Google|Microsoft|Amazon|retain|stores? your/i);
+  });
+
+  it("shows the exact voice in use and whether it is local or network", () => {
+    setup({ voices: [LOCAL, NET_A], review: false });
+    open();
+    const current = screen.getByTestId("current-voice");
+    expect(current).toHaveTextContent("Local voice");
+    expect(current).toHaveTextContent("Local voice");
+    pick("Net Alpha");
+    expect(screen.getByTestId("current-voice")).toHaveTextContent("Net Alpha");
+    expect(screen.getByTestId("current-voice")).toHaveTextContent(
+      "Network voice",
+    );
+  });
+
+  it("is never used before the visitor agrees, and the agreement for a voice they picked is remembered for that voice", async () => {
+    const view = setup({ voices: [LOCAL, NET_A], review: false });
+    open();
+    pick("Net Alpha");
+    await press("Preview voice");
+    expect(synth.spoken).toHaveLength(0);
+
+    await press("Use network voice");
+    expect(
+      JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? "{}"),
+    ).toMatchObject({ voiceName: "Net Alpha", consentVoice: "Net Alpha" });
+    expect(
+      screen.getByText(/remembered in this browser for this voice only/),
+    ).toBeInTheDocument();
+
+    // A later visit: the same voice is used without asking again.
+    view.unmount();
+    setup({ voices: [LOCAL, NET_A], review: false });
+    await press("Start voice assistant");
+    expect(synth.texts).toEqual([WELCOME_TEXT]);
+    expect(synth.spoken[0].voice).toBe(NET_A);
+  });
+
+  it("does not carry the agreement to another network voice", async () => {
+    localStorage.setItem(
+      SETTINGS_KEY,
+      JSON.stringify({ voiceName: "Net Alpha", consentVoice: "Net Alpha" }),
+    );
+    setup({ voices: [LOCAL, NET_A, NET_B], review: false });
+    open();
+    pick("Net Beta");
+    expect(screen.getByText("You picked a network voice")).toBeInTheDocument();
+    await press("Preview voice");
+    expect(synth.spoken).toHaveLength(0);
+    expect(
+      JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? "{}").consentVoice,
+    ).toBeNull();
+  });
+
+  it("does not remember an agreement for a voice nobody picked (only a network voice exists)", async () => {
+    setup({ voices: [NET_A], review: false });
+    open();
+    expect(
+      screen.getByText("Only a network voice is available"),
+    ).toBeInTheDocument();
+    await press("Use network voice");
+    await press("Preview voice");
+    expect(synth.spoken[0].voice).toBe(NET_A);
+    expect(localStorage.getItem(SETTINGS_KEY)).toBeNull();
+  });
+
+  it("lets the visitor withdraw the agreement and go back to the recommended voice", async () => {
+    localStorage.setItem(
+      SETTINGS_KEY,
+      JSON.stringify({ voiceName: "Net Alpha", consentVoice: "Net Alpha" }),
+    );
+    setup({ voices: [LOCAL, NET_A], review: false });
+    open();
+    await press("Stop using network voice");
+    expect(
+      JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? "{}").consentVoice,
+    ).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Use network voice" }),
+    ).toBeInTheDocument();
+
+    await press("Back to the recommended voice");
+    expect((screen.getByLabelText("Voice") as HTMLSelectElement).value).toBe(
+      "",
+    );
+    expect(screen.getByTestId("current-voice")).toHaveTextContent(
+      "Local voice",
+    );
+  });
+
+  it("falls back to a local voice, and still speaks, when the remembered network voice disappears", async () => {
+    localStorage.setItem(
+      SETTINGS_KEY,
+      JSON.stringify({ voiceName: "Net Alpha", consentVoice: "Net Alpha" }),
+    );
+    setup({ voices: [LOCAL], review: false });
+    open();
+    expect((screen.getByLabelText("Voice") as HTMLSelectElement).value).toBe(
+      "",
+    );
+    expect(screen.getByTestId("current-voice")).toHaveTextContent(
+      "Local voice",
+    );
+    await press("Preview voice");
+    expect(synth.spoken[0].voice).toBe(LOCAL);
+  });
+
+  it("keeps the voice list and the preference in the browser: nothing is sent to the server", async () => {
+    setup({ voices: [LOCAL, NET_A], review: false });
+    open();
+    pick("Net Alpha");
+    await press("Use network voice");
+    await press("Preview voice");
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(sendTurn).not.toHaveBeenCalled();
+  });
+});
+
+describe("the live orb in the stage", () => {
+  it("analyses the recording's own stream while Listening and releases everything afterwards", async () => {
+    const frames = installAudio();
+    try {
+      setup({ review: false });
+      await startSession();
+      expect(FakeAudioContext.instances).toHaveLength(0);
+
+      await press("Tap to speak");
+      await screen.findByRole("button", { name: "Stop" });
+      expect(FakeAudioContext.instances).toHaveLength(1);
+      expect(media.getUserMedia).toHaveBeenCalledTimes(1); // no second capture
+      expect(frames.pending()).toBe(1);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1000);
+      });
+      await press("Stop");
+      const [context] = FakeAudioContext.instances;
+      expect(context.closed).toBe(true);
+      expect(frames.pending()).toBe(0);
+      expect(media.streams.every((stream) => stream.allStopped)).toBe(true);
+    } finally {
+      frames.uninstall();
+    }
+  });
+
+  it("works without Web Audio: the same states, no analyser", async () => {
+    setup({ review: false });
+    await startSession();
+    await press("Tap to speak");
+    await screen.findByRole("button", { name: "Stop" });
+    expect(status()).toHaveTextContent("Listening");
+    expect(
+      document.querySelector("[data-orb-stage='listening']"),
+    ).not.toBeNull();
   });
 });

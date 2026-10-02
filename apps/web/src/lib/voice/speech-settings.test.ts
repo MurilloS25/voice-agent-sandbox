@@ -210,3 +210,92 @@ describe("knowing that speech really started", () => {
     expect(onStart).not.toHaveBeenCalled();
   });
 });
+
+describe("network voice agreement", () => {
+  const NET = fakeVoice({ name: "Net", localService: false });
+  const NET2 = fakeVoice({ name: "Net2", localService: false });
+
+  it("remembers an agreement only for a voice the visitor picked", () => {
+    const storage = memoryStorage();
+    const out = createSpeechOutput(
+      new FakeSynth([PLAIN, NET]),
+      FakeUtterance,
+      storage,
+    );
+    out.agreeToNetworkVoice(); // the automatic choice is local: nothing to agree to
+    expect(storage.data.size).toBe(0);
+
+    out.setSettings({ voiceName: "Net" });
+    expect(out.speak("a", "Hi.")).toBe("needs_consent");
+    out.agreeToNetworkVoice();
+    expect(JSON.parse(storage.data.get(KEY) ?? "")).toMatchObject({
+      voiceName: "Net",
+      consentVoice: "Net",
+    });
+    expect(out.getSnapshot().networkConsented).toBe(true);
+    expect(out.speak("a", "Hi.")).toBe("started");
+  });
+
+  it("does not remember an agreement for an automatic network choice", () => {
+    const storage = memoryStorage();
+    const out = createSpeechOutput(
+      new FakeSynth([NET]),
+      FakeUtterance,
+      storage,
+    );
+    out.agreeToNetworkVoice();
+    expect(storage.data.size).toBe(0);
+    expect(out.getSnapshot().networkConsented).toBe(false);
+  });
+
+  it("ends the agreement when another voice is picked, or when it is withdrawn", () => {
+    const storage = memoryStorage({
+      [KEY]: '{"voiceName":"Net","consentVoice":"Net"}',
+    });
+    const out = createSpeechOutput(
+      new FakeSynth([PLAIN, NET, NET2]),
+      FakeUtterance,
+      storage,
+    );
+    expect(out.getSnapshot().networkConsented).toBe(true);
+    out.setSettings({ voiceName: "Net2" });
+    expect(out.getSnapshot().networkConsented).toBe(false);
+    expect(JSON.parse(storage.data.get(KEY) ?? "").consentVoice).toBeNull();
+
+    out.setSettings({ voiceName: "Net" });
+    out.agreeToNetworkVoice();
+    out.withdrawNetworkVoice();
+    expect(out.getSnapshot().networkConsented).toBe(false);
+    expect(out.speak("a", "Hi.")).toBe("needs_consent");
+  });
+
+  it("an agreement is void if the remembered voice is gone", () => {
+    const storage = memoryStorage({
+      [KEY]: '{"voiceName":"Net","consentVoice":"Net"}',
+    });
+    const out = createSpeechOutput(
+      new FakeSynth([PLAIN]),
+      FakeUtterance,
+      storage,
+    );
+    expect(out.getSnapshot().choice).toMatchObject({ kind: "local" });
+    expect(out.getSnapshot().networkConsented).toBe(false);
+  });
+});
+
+describe("without speech synthesis", () => {
+  it("still keeps the visitor's other choices", () => {
+    const storage = memoryStorage();
+    const out = create(undefined, undefined, storage);
+    out.setSettings({ reviewBeforeSending: true });
+    expect(out.getSnapshot().settings.reviewBeforeSending).toBe(true);
+    expect(out.getSnapshot().supported).toBe(false);
+    expect(JSON.parse(storage.data.get(KEY) ?? "").reviewBeforeSending).toBe(
+      true,
+    );
+    const again = create(undefined, undefined, storage);
+    expect(again.getSnapshot().settings.reviewBeforeSending).toBe(true);
+    again.resetSettings();
+    expect(again.getSnapshot().settings.reviewBeforeSending).toBe(false);
+  });
+});
