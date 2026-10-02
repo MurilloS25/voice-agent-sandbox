@@ -75,7 +75,7 @@ export function Orb({
     stage === "transcribing" || stage === "thinking" || stage === "preparing";
   return (
     <span
-      className={`relative mx-auto block aspect-square max-w-full ${small ? "w-[clamp(5rem,14dvh,7.5rem)]" : "w-[clamp(8rem,30dvh,15rem)]"}`}
+      className={`relative mx-auto block aspect-square max-w-full ${small ? "w-[clamp(56px,10dvh,7rem)]" : "w-[clamp(96px,22dvh,15rem)]"}`}
     >
       {active ? (
         <span

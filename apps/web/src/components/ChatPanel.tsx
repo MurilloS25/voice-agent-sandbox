@@ -175,6 +175,8 @@ export function ChatPanel({
 
   const [mode, setMode] = useState<AssistantMode>(initialMode);
   const [panel, setPanel] = useState<PanelKind | null>(null);
+  // Below the wide layout the three panel buttons live behind "More", to leave room for the stage.
+  const [moreOpen, setMoreOpen] = useState(false);
   // The visitor started the voice session. It lives in memory only: a reload starts it again.
   const [sessionActive, setSessionActive] = useState(false);
   // A transcript is waiting in the box for the visitor to check, edit and send (or discard).
@@ -889,7 +891,7 @@ export function ChatPanel({
 
       <div
         ref={logRef}
-        className="min-h-0 flex-1 space-y-6 overflow-y-auto p-4 sm:p-6"
+        className="relative min-h-0 flex-1 space-y-6 overflow-y-auto p-4 sm:p-6"
       >
         {log("text")}
         {problem && phase.kind !== "invalid" ? problem : null}
@@ -1005,7 +1007,7 @@ export function ChatPanel({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 pb-2 sm:px-8">
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-0 px-4 pb-1 sm:px-8 sm:pb-2">
         <div
           role="group"
           aria-label="Assistant mode"
@@ -1017,7 +1019,7 @@ export function ChatPanel({
               type="button"
               aria-pressed={mode === value}
               onClick={() => chooseMode(value)}
-              className={`min-h-12 rounded-full px-6 py-2 font-bold ${
+              className={`min-h-12 rounded-full px-5 py-2 font-bold sm:px-6 ${
                 mode === value ? "bg-bottle text-cream" : "hover:bg-celeste/40"
               }`}
             >
@@ -1025,7 +1027,21 @@ export function ChatPanel({
             </button>
           ))}
         </div>
-        <div className="flex flex-wrap items-center">
+        <button
+          type="button"
+          aria-expanded={moreOpen || panel !== null}
+          aria-controls="panel-menu"
+          onClick={() => setMoreOpen((open) => !open)}
+          className={`${toolbarButton} border border-bottle/30 lg:hidden`}
+        >
+          More
+        </button>
+        <div
+          id="panel-menu"
+          className={`w-full flex-wrap items-center lg:flex lg:w-auto ${
+            moreOpen || panel !== null ? "flex" : "hidden"
+          }`}
+        >
           {mode === "voice" ? (
             <button
               type="button"
@@ -1060,7 +1076,7 @@ export function ChatPanel({
 
       <div
         className={`grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)] gap-4 px-4 pb-4 sm:px-8 ${
-          panel ? "lg:grid-cols-[minmax(0,1fr)_26rem]" : ""
+          panel ? "lg:grid-cols-[minmax(0,1fr)_minmax(0,min(26rem,40%))]" : ""
         }`}
       >
         <div className={`min-h-0 min-w-0 ${panel ? "max-lg:hidden" : ""}`}>

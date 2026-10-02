@@ -104,6 +104,8 @@ export function VoiceStage({
     () => false,
   );
   const alertRef = useRef<HTMLDivElement>(null);
+  const orbRef = useRef<HTMLButtonElement>(null);
+  const previousStage = useRef<StageKind | null>(null);
   const heardRef = useRef<HTMLTextAreaElement>(null);
   useImperativeHandle(controlRef, () => ({ cancel: capture.cancel }), [
     capture.cancel,
@@ -137,6 +139,15 @@ export function VoiceStage({
   useEffect(() => {
     if (captureProblem) alertRef.current?.focus();
   }, [captureProblem]);
+
+  // Leaving the review (sent or cancelled) removes the text box that had focus: the one main
+  // control takes it, so a keyboard user is never dropped at the top of the page.
+  useEffect(() => {
+    if (previousStage.current === "review" && stage !== "review") {
+      orbRef.current?.focus();
+    }
+    previousStage.current = stage;
+  }, [stage]);
 
   const copy = STAGE_COPY[stage];
   const unsupported = hydrated && !capture.supported;
@@ -183,7 +194,7 @@ export function VoiceStage({
     return (
       <section
         aria-labelledby="voice-heading"
-        className="h-full min-h-0 overflow-y-auto"
+        className="relative h-full min-h-0 overflow-y-auto"
       >
         <div className="mx-auto flex max-w-xl flex-col items-center gap-4 px-4 py-10 text-center">
           <h2
@@ -215,17 +226,19 @@ export function VoiceStage({
   return (
     <section
       aria-labelledby="voice-heading"
-      className="h-full min-h-0 overflow-y-auto"
+      className="relative h-full min-h-0 overflow-y-auto"
     >
       <h2 id="voice-heading" className="sr-only">
         Voice assistant
       </h2>
       <div
-        className={`mx-auto grid w-full max-w-6xl gap-x-10 gap-y-6 px-4 py-5 sm:px-8 ${
-          review ? "lg:grid-cols-[minmax(0,1fr)_minmax(0,28rem)]" : ""
+        className={`mx-auto grid w-full max-w-6xl gap-x-10 gap-y-4 px-4 py-2 sm:px-8 sm:py-4 ${
+          review
+            ? "lg:grid-cols-[minmax(0,1fr)_minmax(0,min(28rem,45%))] lg:grid-rows-[auto_1fr] lg:items-start"
+            : ""
         }`}
       >
-        <div className="mx-auto flex w-full max-w-xl min-w-0 flex-col items-center gap-4 text-center">
+        <div className="mx-auto flex w-full max-w-xl min-w-0 flex-col items-center gap-3 text-center sm:gap-4 lg:col-start-1">
           <p
             role="status"
             aria-live="polite"
@@ -239,24 +252,18 @@ export function VoiceStage({
               {formatClock(MAX_RECORDING_MS)}
             </p>
           ) : null}
-          {copy.hint ? (
-            <p className="max-w-md text-sm">
-              {stage === "transcribing" &&
-              capture.state.kind === "transcribing" &&
-              capture.state.autoStopped
-                ? "Recording stopped after 15 seconds. Turning it into text."
-                : copy.hint}
-            </p>
-          ) : null}
-
           {showOrbButton ? (
             <button
+              ref={orbRef}
               type="button"
               onClick={actionDisabled ? undefined : primary}
               aria-disabled={actionDisabled || undefined}
               className="group flex min-h-12 flex-col items-center gap-3 rounded-[2rem] p-2"
             >
-              <Orb stage={stage} />
+              <Orb
+                stage={stage}
+                small={review !== null && review !== undefined}
+              />
               <span
                 className={primaryClass + " group-aria-disabled:opacity-60"}
               >
@@ -264,7 +271,9 @@ export function VoiceStage({
               </span>
             </button>
           ) : (
-            <Orb stage="review" small />
+            <span className="[@media(max-height:40rem)]:hidden">
+              <Orb stage="review" small />
+            </span>
           )}
 
           {stage === "listening" ? (
@@ -275,6 +284,16 @@ export function VoiceStage({
             >
               Cancel recording
             </button>
+          ) : null}
+
+          {copy.hint && stage !== "review" && !review ? (
+            <p className="max-w-md text-sm">
+              {stage === "transcribing" &&
+              capture.state.kind === "transcribing" &&
+              capture.state.autoStopped
+                ? "Recording stopped after 15 seconds. Turning it into text."
+                : copy.hint}
+            </p>
           ) : null}
 
           {stage === "review" ? (
@@ -324,8 +343,7 @@ export function VoiceStage({
                 />
                 <p id="heard-help" className="mt-1 text-sm">
                   {draft.length} of {MAX_MESSAGE_LENGTH} characters. Enter
-                  sends, Shift and Enter adds a line. Please don&apos;t say
-                  personal details.
+                  sends. Please don&apos;t say personal details.
                 </p>
               </div>
               <div className="flex flex-wrap gap-3">
@@ -402,7 +420,15 @@ export function VoiceStage({
               Read reply aloud
             </button>
           ) : null}
+        </div>
 
+        {review ? (
+          <div className="min-w-0 lg:col-start-2 lg:row-span-2 lg:row-start-1">
+            {review}
+          </div>
+        ) : null}
+
+        <div className="mx-auto flex w-full max-w-xl min-w-0 flex-col items-center gap-3 text-center sm:gap-4 lg:col-start-1">
           {stage === "review" ? null : sendingMessage !== null || lastTurn ? (
             <section
               aria-label="Latest exchange"
@@ -450,8 +476,6 @@ export function VoiceStage({
             {footer}
           </div>
         </div>
-
-        {review ? <div className="min-w-0">{review}</div> : null}
       </div>
     </section>
   );

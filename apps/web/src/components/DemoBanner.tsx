@@ -5,11 +5,11 @@ export function DemoBanner({ compact = false }: { compact?: boolean }) {
     return (
       <aside
         aria-label="Demo notice"
-        className="flex shrink-0 items-start gap-3 px-4 py-2 text-sm font-bold text-bottle sm:px-8"
+        className="flex shrink-0 items-start gap-2 px-4 py-1 text-xs leading-snug font-bold text-bottle sm:gap-3 sm:px-8 sm:py-2 sm:text-sm"
       >
         <span
           aria-hidden="true"
-          className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full bg-hivis ring-2 ring-bottle"
+          className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full bg-hivis ring-2 ring-bottle sm:mt-1.5"
         />
         <span className="max-w-5xl">
           Fictional demo: Quillwheel Cycle Works is not a real business. Nothing

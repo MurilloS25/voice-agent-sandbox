@@ -1,6 +1,6 @@
 # Plan 0006 — Voice-first assistant experience
 
-Status: in progress. Branch `feature/voice-first-experience`, created from `53732ab` (PR #4 merged). A product-experience iteration before hardening and deployment (not Milestone 5). Web only: no agent, provider, model, prompt, STT, API, OpenAPI, database or dependency change.
+Status: completed. Branch `feature/voice-first-experience`, created from `53732ab` (PR #4 merged). A product-experience iteration before hardening and deployment (not Milestone 5). Web only: no agent, provider, model, prompt, STT, API, OpenAPI, database or dependency change.
 
 # Outcome
 
@@ -42,3 +42,5 @@ Web: `gen:api` (no drift), Prettier, ESLint, typecheck, Vitest, build. API check
 ## Decisions or follow-ups
 
 ADR 0010 records the stage/state model and the voice ranking rule. Not done here: real device voices and a real microphone (headless Edge only), other browsers, hands-free mode, hardening and deployment (Milestone 5).
+
+Result: all offline web checks passed (`gen:api` without drift, Prettier with the existing policy, ESLint, typecheck, Vitest, production build); the API, `openapi.json`, the agent, the transcription route, `ConfirmForm` and `POST /v1/appointments` were not touched, so the API checks were not run. The browser rehearsals (scripted model and speech-to-text on loopback, throwaway Edge profile, stub `speechSynthesis`, fake microphone, no provider) were clean at 1440, 390 and 320 px, 200% text (real browser font size) and 720x450 (zoom 2x): no horizontal overflow, axe clean, no console messages, only loopback requests, a visible focus ring, and a focus order of header, modes, panel buttons, stage. Defects found by the rehearsals and fixed: `sr-only` elements escaped the scroll containers and made the document scroll; the panel buttons and the chrome left no room for the main control on a 320x568 screen (compact header and banner, a "More" menu below `lg`, hint moved under the control); the empty activity panel was a scroll region with no keyboard access; focus fell to the page when the review text box was removed after Send. Known limits: at 200% text or 720x450 the Stop and Send controls sit below the first screen of the stage and are reached by its own scroll; switching Voice and Text while **Confirm booking** is in flight remounts the form (the Server Action and its redirect are not affected); the "Online" voices are used only after an explicit opt-in, so the automatic voice is the best local one; a real microphone, device voices, a phone, a screen reader and browsers other than Edge were not exercised.

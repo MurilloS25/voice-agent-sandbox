@@ -49,10 +49,10 @@ export default async function AssistantPage(props: PageProps<"/assistant">) {
   );
 
   return (
-    <div className="flex h-dvh min-h-[34rem] flex-col overflow-hidden bg-[linear-gradient(180deg,rgb(143_211_206/0.28),var(--color-cream)_55%)] pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)]">
+    <div className="relative flex h-dvh min-h-[26rem] flex-col overflow-hidden bg-[linear-gradient(180deg,rgb(143_211_206/0.28),var(--color-cream)_55%)] pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)]">
       <AssistantHeader />
       <DemoBanner compact />
-      <main className="min-h-0 flex-1 pt-3">
+      <main className="min-h-0 flex-1 pt-2 sm:pt-3">
         <ChatPanel initialDraft={initialDraft} />
       </main>
     </div>

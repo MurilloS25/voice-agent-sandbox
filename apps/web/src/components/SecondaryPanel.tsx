@@ -69,7 +69,11 @@ export function SecondaryPanel({
           Close
         </button>
       </div>
-      <div ref={body} className="min-h-0 flex-1 overflow-y-auto px-5 pt-2 pb-5">
+      <div
+        ref={body}
+        tabIndex={0}
+        className="relative min-h-0 flex-1 overflow-y-auto px-5 pt-2 pb-5"
+      >
         {children}
       </div>
     </aside>

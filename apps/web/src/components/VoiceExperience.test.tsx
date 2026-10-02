@@ -416,6 +416,24 @@ describe("a voice turn", () => {
     expect(submissions()).toHaveLength(1);
   });
 
+  it("hands focus to the main control when the review is sent or cancelled", async () => {
+    setup();
+    await startSession();
+    await recordUntilReview("first take");
+    expect(heardBox()).toHaveFocus();
+    await press("Send what I said");
+    expect(
+      screen.getByRole("button", { name: /Please wait|Stop speaking/ }),
+    ).toHaveFocus();
+
+    await screen.findByText(/Answer to: first take/);
+    browserStartsSpeaking();
+    browserFinishesSpeaking();
+    await recordUntilReview("second take");
+    await press("Cancel");
+    expect(screen.getByRole("button", { name: "Tap to speak" })).toHaveFocus();
+  });
+
   it("will not send an empty message", async () => {
     setup();
     await startSession();
@@ -863,6 +881,35 @@ describe("the booking review in Voice", () => {
       "href",
       "/assistant?service=flat-repair&date=2026-10-01",
     );
+  });
+});
+
+describe("the compact toolbar", () => {
+  it("keeps the panel buttons behind a labelled More button on small screens", () => {
+    setup();
+    const more = screen.getByRole("button", { name: "More" });
+    expect(more).toHaveAttribute("aria-expanded", "false");
+    expect(more).toHaveAttribute("aria-controls", "panel-menu");
+    expect(document.getElementById("panel-menu")).toContainElement(
+      screen.getByRole("button", { name: "View transcript" }),
+    );
+    fireEvent.click(more);
+    expect(more).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(more);
+    expect(more).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("stays open while a panel is open, so closing it can give focus back", () => {
+    setup();
+    fireEvent.click(screen.getByRole("button", { name: "More" }));
+    const opener = screen.getByRole("button", { name: "View transcript" });
+    fireEvent.click(opener);
+    expect(screen.getByRole("button", { name: "More" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Close transcript" }));
+    expect(opener).toHaveFocus();
   });
 });
 
