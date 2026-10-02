@@ -1,0 +1,64 @@
+"""Static checks of the deployment files: nothing secret, nothing unpinned, nothing unsafe."""
+
+import re
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[3]
+DOCKERFILE = (ROOT / "apps" / "api" / "Dockerfile").read_text("utf-8")
+RENDER = (ROOT / "render.yaml").read_text("utf-8")
+DOCKERIGNORE = (ROOT / ".dockerignore").read_text("utf-8")
+PRODUCTION_EXAMPLE = (ROOT / "apps" / "api" / ".env.production.example").read_text("utf-8")
+WEB_EXAMPLE = (ROOT / "apps" / "web" / ".env.production.example").read_text("utf-8")
+
+SECRET_NAMES = [
+    "API_SHARED_SECRET",
+    "PROPOSAL_SIGNING_KEY",
+    "DB_PASSWORD",
+    "GROQ_API_KEY",
+    "DB_HOST",
+    "DB_USER",
+]
+
+
+def test_the_image_is_pinned_multi_stage_and_non_root() -> None:
+    froms = re.findall(r"^FROM (\S+)", DOCKERFILE, re.MULTILINE)
+    assert len(froms) == 2 and all("@sha256:" in image for image in froms)
+    assert re.search(r'"uv==\d+\.\d+\.\d+"', DOCKERFILE)
+    assert re.search(r"^USER app$", DOCKERFILE, re.MULTILINE)
+    assert "--frozen" in DOCKERFILE and "--no-dev" in DOCKERFILE
+
+
+def test_the_image_never_receives_a_secret_at_build_time() -> None:
+    assert "ARG " not in DOCKERFILE
+    for name in SECRET_NAMES:
+        assert f"ENV {name}" not in DOCKERFILE and f"{name}=" not in DOCKERFILE
+
+
+def test_the_server_runs_one_worker_without_access_log_or_proxy_trust() -> None:
+    command = DOCKERFILE[DOCKERFILE.index("CMD ") :]
+    for flag in ("--workers 1", "--no-access-log", "--no-proxy-headers"):
+        assert flag in command
+    assert "--reload" not in command and "--forwarded-allow-ips" not in command
+
+
+def test_the_context_excludes_environment_files_tests_and_the_web_app() -> None:
+    for pattern in (".env", ".env.*", "apps/web", "apps/api/tests", ".git"):
+        assert pattern in DOCKERIGNORE.splitlines()
+
+
+def test_render_blueprint_carries_no_secret_values_and_uses_the_free_plan() -> None:
+    assert "plan: free" in RENDER and "maxShutdownDelaySeconds: 30" in RENDER
+    assert "healthCheckPath: /health/ready" in RENDER
+    for name in SECRET_NAMES:
+        block = re.search(rf"- key: {name}\n(\s+)(\S+)", RENDER)
+        assert block is not None, name
+        assert block.group(2) == "sync:", name  # `sync: false`: entered in the dashboard only
+
+
+def test_the_example_files_list_names_only() -> None:
+    for text in (PRODUCTION_EXAMPLE, WEB_EXAMPLE):
+        for line in text.splitlines():
+            match = re.match(r"^([A-Z_]+)=(\S*)", line)
+            if match and match.group(1) in [*SECRET_NAMES, "CLIENT_ID_KEY"]:
+                assert match.group(2) == "", line
+    assert "NEXT_PUBLIC" not in WEB_EXAMPLE.replace("none of these starts with NEXT_PUBLIC_", "")
