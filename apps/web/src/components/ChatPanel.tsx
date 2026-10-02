@@ -17,12 +17,13 @@ import {
   MAX_TURN_INDEX,
   normalizeMessage,
 } from "@/lib/agent-message";
+import { draftFor } from "@/lib/assistant-link";
 import { newUuid } from "@/lib/uuid";
 import { useSpeechOutput } from "@/lib/voice/use-speech-output";
 
 import { AssistantWelcome } from "./AssistantWelcome";
 import { ExecutionTimeline } from "./ExecutionTimeline";
-import { Transcript } from "./Transcript";
+import { Transcript, type ReviewAgain } from "./Transcript";
 import { SpokenReplies } from "./SpokenReplies";
 import { VoiceInput, type VoiceControl } from "./VoiceInput";
 
@@ -266,6 +267,18 @@ export function ChatPanel({ initialDraft = "" }: { initialDraft?: string }) {
   }, [contextFocus]);
 
   /**
+   * A click on "Review again" is a new request each time, even for the same service and day. It
+   * prepares the draft only in an empty box and never sends. (A context that arrives through the
+   * address is handled once, above.)
+   */
+  function reviewAgain(context: ReviewAgain) {
+    const text = draftFor(context);
+    if (text === "" || draft.trim() !== "") return;
+    setDraft(text);
+    setContextFocus((count) => count + 1);
+  }
+
+  /**
    * A quick start fills the box, and only when it is empty: text the visitor wrote is never
    * replaced or extended. Nothing is sent. (The buttons are disabled while the box has text.)
    */
@@ -498,6 +511,7 @@ export function ChatPanel({ initialDraft = "" }: { initialDraft?: string }) {
                   unsent={conversation.unsent}
                   readOnly
                   idPrefix={`earlier-${index}`}
+                  onReviewAgain={reviewAgain}
                 />
               </div>
             </details>
@@ -519,6 +533,7 @@ export function ChatPanel({ initialDraft = "" }: { initialDraft?: string }) {
               liveReviewTurn={liveReviewTurn}
               focusTurn={focusTurn}
               idPrefix="current"
+              onReviewAgain={reviewAgain}
               playback={
                 speechState.supported && speechState.choice.kind !== "none"
                   ? {

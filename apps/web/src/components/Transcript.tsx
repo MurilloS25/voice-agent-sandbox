@@ -38,7 +38,12 @@ type TranscriptProps = {
   idPrefix: string;
   /** Listen / Stop on assistant replies. Omitted when no voice is available or read-only. */
   playback?: Playback;
+  /** A plain click on a link back to the assistant (for example "Review again"). */
+  onReviewAgain?: (context: ReviewAgain) => void;
 };
+
+/** What a click on a link back to the assistant means: ask again about this service and day. */
+export type ReviewAgain = { serviceName: string; date?: string };
 
 type Tone = "user" | "assistant" | "system";
 
@@ -131,16 +136,40 @@ function ReviewBlock({
   review,
   live,
   turnIndex,
+  onReviewAgain,
 }: {
   review: Review;
   live: boolean;
   turnIndex: number;
+  onReviewAgain?: (context: ReviewAgain) => void;
 }) {
   const again = assistantAgainHref(review);
   return (
     <section
       aria-label={`Booking review for reply ${turnIndex}`}
       className="max-w-2xl border-2 border-l-8 border-bottle bg-white p-4 sm:ml-12"
+      onClick={(event) => {
+        // Every plain click on a link back to the assistant is a new request from the visitor,
+        // even when the address does not change. The link still navigates as usual.
+        if (
+          !onReviewAgain ||
+          event.button !== 0 ||
+          event.metaKey ||
+          event.ctrlKey ||
+          event.shiftKey ||
+          event.altKey
+        ) {
+          return;
+        }
+        const link = (event.target as Element).closest("a");
+        if (!link || !link.getAttribute("href")?.startsWith("/assistant")) {
+          return;
+        }
+        onReviewAgain({
+          serviceName: review.service.name,
+          date: tryLocalDateOf(review.start, review.timezone),
+        });
+      }}
     >
       <p className="font-bold">
         Review prepared by the schedule service — nothing is booked until you
@@ -182,6 +211,7 @@ export function Transcript({
   focusTurn = null,
   idPrefix,
   playback,
+  onReviewAgain,
 }: TranscriptProps) {
   const root = useRef<HTMLOListElement>(null);
 
@@ -229,6 +259,7 @@ export function Transcript({
                 <ReviewBlock
                   review={review}
                   turnIndex={response.turn_index}
+                  onReviewAgain={onReviewAgain}
                   live={!readOnly && liveReviewTurn === response.turn_index}
                 />
               ) : null}
