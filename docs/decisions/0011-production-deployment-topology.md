@@ -1,6 +1,6 @@
 # Deployment topology: Vercel web, a single always-on FastAPI service, Supabase and Groq
 
-- Status: **proposed** (awaiting gate G0 of [plan 0007](../plans/0007-production-hardening-and-deployment.md)). Nothing described here is built or deployed. Prices and limits are as the official pages stated them on 2026-10-02; the plan lists what could not be confirmed.
+- Status: **proposed** (G0 approved with decisions D1 to D9 on 2026-10-02; becomes accepted at G10). Gates G1 to G3 are implemented and verified locally; nothing is deployed. Prices and limits are as the official pages stated them on 2026-10-02; the plan lists what could not be confirmed.
 - Date: 2026-10-02
 
 ## Context

@@ -232,3 +232,27 @@ Do not do any of this before G0 is approved and the corresponding gate is reache
 # Decisions to record and follow-ups
 
 ADR 0011 (`proposed`) records the topology. After G0 it becomes `accepted` or is replaced. Deferred and not planned here: persistent conversations, visitor authentication, rescheduling and cancellation, real-time or streaming speech, multi-instance scaling, an external rate-limit store, and measuring audio duration on the server with a media library.
+
+# Implementation status: gates G1 to G3 (2026-10-02)
+
+Done on `feature/production-hardening-deployment`, verified locally only. No account, secret, remote migration or deployment was touched.
+
+**Commits:** `feat(api): add production trust boundary and limits`, `feat(api): add durable provider budgets`, `feat(web): add secure gateway and startup recovery`, `chore(deploy): add reproducible deployment configuration`, and this documentation commit.
+
+**Calculated limits (all environment settings, production rejects values above the ceilings; tuned after G9):**
+
+| Setting | Value | Why |
+| --- | --- | --- |
+| Agent turns, overall / per visitor per minute | 3 / 6 | `floor(0.7 x 8,000 TPM / ~2,000 tokens per turn)` is 2 to 3; a visitor may burst but not exceed the global rate |
+| Speech, overall / per visitor per minute | 6 / 6 | Whisper Free allows 20 RPM; 6 leaves a wide margin and matches a person's pace |
+| Confirmations, overall / per visitor | 12 / 6 | Writes are rare; still bounded |
+| Reads, overall / per visitor | 300 / 60 | Page loads and polling are cheap and need headroom |
+| In flight: agent 2, speech 2 | 2 | One Free instance (0.1 CPU) and the bounded thread pools |
+| Daily budget | 100,000 tokens, 14,400 audio s | Half of the provider's Free daily limits (200K tokens, 28.8K audio s), so the demo can never exhaust the account on its own |
+| Per turn reserve | 4,000 tokens | Above the measured 1.5K to 3K, settled to real usage |
+| Audio | 256 KB; charged `max(10 s, ceil(bytes/3,000))` | 15 s at the highest browser bitrate; a clip can never be undercounted |
+| JSON body | 16 KB | Messages are 500 characters |
+
+**Residual risks:** the visitor address header on Vercel is verified only at G7 (until then all visitors may share one strict "unattributed" bucket); Next.js route handlers buffer the (at most 256 KB) audio body, and a body above the limit is rejected on its declared length or while reading, not before arrival; conversations are lost on Render restart (the UI says bookings already confirmed are saved); the Supabase CA file is supplied at G5.
+
+**Manual steps ahead (owner), in order:** G4 accounts and dashboards (Supabase CA download and a new `voice_agent_api` password, Groq production project with ZDR and project limits, Render and Vercel accounts); G5 apply the `provider_budget` migration with the Supabase CLI after review, add the CA file with its fingerprint, create the Render service from `render.yaml` and enter the secrets in the dashboard; G6 first deploy with CSP Report-Only; G7 verify the visitor header, 401/429/budget behaviour and headers against the deployed URLs; G8 real-microphone session. Each stops for approval before the next.
