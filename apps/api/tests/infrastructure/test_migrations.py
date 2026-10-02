@@ -21,14 +21,15 @@ def code(path: Path) -> str:
     return "\n".join(lines).lower()
 
 
-def test_the_three_booking_migrations_exist_with_cli_generated_names() -> None:
+def test_the_migrations_exist_with_cli_generated_names() -> None:
     names = [p.name for p in MIGRATIONS]
-    assert len(names) == 3
+    assert len(names) == 4
     assert all(re.fullmatch(r"\d{14}_[a-z_]+\.sql", n) for n in names)
     assert [n.split("_", 1)[1] for n in names] == [
         "booking_schema.sql",
         "booking_catalog_seed.sql",
         "booking_api_role.sql",
+        "provider_budget.sql",
     ]
 
 

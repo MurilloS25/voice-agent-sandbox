@@ -21,6 +21,7 @@ from voice_agent_api.agent.errors import (
     TurnOutOfOrder,
 )
 from voice_agent_api.api.schemas import ErrorBody, ErrorFieldDetail, ErrorResponse
+from voice_agent_api.budget.errors import BudgetExhausted, BudgetUnavailable
 from voice_agent_api.domain.errors import (
     AppointmentNotFound,
     DateOutsideBookingWindow,
@@ -87,6 +88,8 @@ _DOMAIN_ERRORS: dict[type[DomainError], tuple[int, str]] = {
     TurnOutOfOrder: (409, "turn_out_of_order"),
     ConversationLimitReached: (409, "conversation_limit_reached"),
     AgentBusy: (429, "agent_busy"),
+    BudgetExhausted: (503, "demo_budget_reached"),
+    BudgetUnavailable: (503, "budget_unavailable"),
     AudioTooLarge: (413, "audio_too_large"),
     AudioUnsupported: (415, "audio_unsupported"),
     AudioInvalid: (422, "audio_invalid"),

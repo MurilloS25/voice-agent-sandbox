@@ -82,7 +82,13 @@ _SPEECH_ERRORS: dict[int | str, dict[str, Any]] = {
         },
     },
     502: {"model": ErrorResponse, "description": "transcription_failed."},
-    503: {"model": ErrorResponse, "description": "speech_unavailable: no provider is configured."},
+    503: {
+        "model": ErrorResponse,
+        "description": (
+            "speech_unavailable (no provider is configured), demo_budget_reached, "
+            "budget_unavailable or service_draining. The provider was not called."
+        ),
+    },
     504: {"model": ErrorResponse, "description": "transcription_timeout."},
 }
 

@@ -1017,7 +1017,7 @@ export interface operations {
           "application/json": components["schemas"]["ErrorResponse"];
         };
       };
-      /** @description agent_unavailable: no provider is configured. */
+      /** @description agent_unavailable (no provider is configured), demo_budget_reached (today's allowance is used up), budget_unavailable (the budget could not be checked) or service_draining (the process is shutting down). The provider was not called. */
       503: {
         headers: {
           [name: string]: unknown;
@@ -1383,7 +1383,7 @@ export interface operations {
           "application/json": components["schemas"]["ErrorResponse"];
         };
       };
-      /** @description speech_unavailable: no provider is configured. */
+      /** @description speech_unavailable (no provider is configured), demo_budget_reached, budget_unavailable or service_draining. The provider was not called. */
       503: {
         headers: {
           [name: string]: unknown;

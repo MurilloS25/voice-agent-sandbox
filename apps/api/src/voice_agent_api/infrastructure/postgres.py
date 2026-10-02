@@ -26,6 +26,8 @@ import psycopg
 from psycopg import errors as pg_errors
 from psycopg_pool import ConnectionPool
 
+from voice_agent_api.budget.errors import BudgetUnavailable
+from voice_agent_api.budget.ledger import BudgetCategory
 from voice_agent_api.config import Settings
 from voice_agent_api.domain.availability import local_day_bounds, local_day_of
 from voice_agent_api.domain.errors import SlotUnavailable, StorageUnavailable
@@ -491,3 +493,48 @@ def build_postgres(
         PostgresAppointmentBook(database, settings.business_id),
         database,
     )
+
+
+_SQL_BUDGET_ROW: LiteralString = (
+    "insert into booking.provider_budget (day_utc, category, consumed, limit_amount) "
+    "values (%s, %s, 0, %s) on conflict (day_utc, category) do nothing"
+)
+# One atomic statement: the row is locked by the update, so two requests cannot both pass the
+# check. It affects no row (and returns nothing) when the reservation would pass the limit.
+_SQL_BUDGET_RESERVE: LiteralString = (
+    "update booking.provider_budget set consumed = consumed + %s, limit_amount = %s, "
+    "updated_at = pg_catalog.now() "
+    "where day_utc = %s and category = %s and consumed + %s <= %s returning consumed"
+)
+_SQL_BUDGET_ADJUST: LiteralString = (
+    "update booking.provider_budget set consumed = "
+    "case when consumed + %s < 0 then 0 else consumed + %s end, "
+    "updated_at = pg_catalog.now() where day_utc = %s and category = %s"
+)
+
+
+class PostgresBudgetLedger:
+    """The daily provider budget in `booking.provider_budget`: a day, a category and two numbers.
+
+    A failure of any kind becomes `BudgetUnavailable`, so the caller refuses the costly call."""
+
+    def __init__(self, database: PostgresDatabase) -> None:
+        self._database = database
+
+    def reserve(self, day: date, category: BudgetCategory, amount: int, limit: int) -> bool:
+        try:
+            with self._database.transaction() as cur:
+                cur.execute(_SQL_BUDGET_ROW, (day, category.value, limit))
+                cur.execute(
+                    _SQL_BUDGET_RESERVE, (amount, limit, day, category.value, amount, limit)
+                )
+                return cur.fetchone() is not None
+        except (StorageUnavailable, pg_errors.Error):
+            raise BudgetUnavailable from None
+
+    def adjust(self, day: date, category: BudgetCategory, delta: int) -> None:
+        try:
+            with self._database.transaction() as cur:
+                cur.execute(_SQL_BUDGET_ADJUST, (delta, delta, day, category.value))
+        except (StorageUnavailable, pg_errors.Error):
+            raise BudgetUnavailable from None

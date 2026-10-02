@@ -35,6 +35,7 @@ from voice_agent_api.agent.state import (
 )
 from voice_agent_api.agent.store import Accepted, Cached, ConversationStore
 from voice_agent_api.agent.tools import ToolExecutor, read_prompt_facts
+from voice_agent_api.budget.guard import BudgetGuard, Reservation
 from voice_agent_api.domain.errors import StorageUnavailable
 from voice_agent_api.domain.models import Proposal
 from voice_agent_api.domain.ports import AppointmentBook, BusinessCatalog
@@ -79,7 +80,9 @@ class AgentService:
         limits: AgentLimits | None = None,
         caller: BoundedCaller | None = None,
         monotonic: Callable[[], float] = time.monotonic,
+        budget: BudgetGuard | None = None,
     ) -> None:
+        self._budget = budget
         self._limits = limits or AgentLimits()
         self._store = store
         self._model = model
@@ -111,8 +114,14 @@ class AgentService:
             raise AgentBusy
         committed = False
         try:
+            # Money first: the day's allowance is reserved before anything costly happens. A
+            # refusal (or a budget that cannot be checked) is raised here, the turn is released
+            # below and nothing was spent.
+            reservation = self._budget.reserve_agent_turn() if self._budget is not None else None
             started = self._monotonic()
             response, update, stats = self._run_turn(request, decision)
+            if self._budget is not None and reservation is not None:
+                self._settle(reservation, stats)
             committed = self._store.commit_turn(
                 decision.conversation_id, decision.turn_token, response, update
             )
@@ -134,6 +143,17 @@ class AgentService:
             if not committed:
                 self._store.abort_turn(decision.conversation_id, decision.turn_token)
             self._gate.release()
+
+    def _settle(self, reservation: Reservation, stats: "_Stats") -> None:
+        if self._budget is None:
+            return
+        if stats.provider_untouched:
+            self._budget.refund(reservation)  # the model was never contacted
+            return
+        used = stats.input_tokens + stats.output_tokens
+        if used > 0:
+            self._budget.settle(reservation, used)
+        # No usage reported: the provider may have counted the call, so the reservation stays.
 
     # -----------------------------------------------------------------------------------------
 
@@ -162,13 +182,16 @@ class AgentService:
         except DeadlineExceeded:
             events.turn_error("turn_deadline_exceeded")
             degraded = "turn_deadline_exceeded"
+            stats.provider_untouched = True
         except (StorageUnavailable, CallTimedOut):
             events.turn_error("storage_unavailable")
             degraded = "storage_unavailable"
+            stats.provider_untouched = True
         except Exception as exc:
             logger.warning("agent_turn_error stage=prompt error=%s", type(exc).__name__)
             events.turn_error("internal_error")
             degraded = "internal_error"
+            stats.provider_untouched = True
         else:
             snapshot = accepted.snapshot
             try:
@@ -282,3 +305,5 @@ class _Stats:
         self.tool_calls = 0
         self.input_tokens = 0
         self.output_tokens = 0
+        # True when the turn ended before any model call could have been made.
+        self.provider_untouched = False

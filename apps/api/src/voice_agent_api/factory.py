@@ -17,6 +17,8 @@ from voice_agent_api.api.errors import register_error_handlers
 from voice_agent_api.api.proposal_tokens import ProposalTokenCodec
 from voice_agent_api.api.routes import router
 from voice_agent_api.api.speech_routes import router as speech_router
+from voice_agent_api.budget.guard import BudgetGuard
+from voice_agent_api.budget.ledger import InMemoryBudgetLedger
 from voice_agent_api.config import (
     MIN_SIGNING_KEY_BYTES,
     Settings,
@@ -128,7 +130,11 @@ def create_app(
 
 
 def build_agent(
-    settings: Settings, catalog: BusinessCatalog, appointments: AppointmentBook, key: bytes
+    settings: Settings,
+    catalog: BusinessCatalog,
+    appointments: AppointmentBook,
+    key: bytes,
+    budget: BudgetGuard | None = None,
 ) -> AgentService | None:
     """The agent for the configured provider, or None when it is disabled (the default).
     Construction makes no network call."""
@@ -144,48 +150,61 @@ def build_agent(
         encode=ProposalTokenCodec(key).encode,
         clock=system_clock,
         limits=AgentLimits.from_settings(settings),
+        budget=budget,
     )
 
 
-def build_speech(settings: Settings) -> SpeechService | None:
+def build_speech(settings: Settings, budget: BudgetGuard | None = None) -> SpeechService | None:
     """The speech service for the configured provider, or None when it is disabled (the default).
     Construction makes no network call."""
     port = build_speech_to_text(settings)
     if port is None:
         return None
-    return SpeechService(port, SpeechLimits.from_settings(settings))
+    return SpeechService(port, SpeechLimits.from_settings(settings), budget)
 
 
 def create_app_from_settings(settings: Settings) -> FastAPI:
     key = resolve_signing_key(settings)
     if settings.appointment_store == "postgres":
         # Imported here so memory mode and OpenAPI generation never need a database.
-        from voice_agent_api.infrastructure.postgres import build_postgres
+        from voice_agent_api.infrastructure.postgres import PostgresBudgetLedger, build_postgres
 
         # `database` is not opened until the app starts, so a failure while building the agent
         # (a ConfigError, already ruled out by validation) leaves nothing connected.
         pg_catalog, pg_book, database = build_postgres(settings)
+        budget = (
+            BudgetGuard.from_settings(PostgresBudgetLedger(database), system_clock, settings)
+            if settings.budget_enforced
+            else None
+        )
         return create_app(
             pg_catalog,
             pg_book,
             system_clock,
             signing_key=key,
             resources=(database,),
-            agent=build_agent(settings, pg_catalog, pg_book, key),
-            speech=build_speech(settings),
+            agent=build_agent(settings, pg_catalog, pg_book, key, budget),
+            speech=build_speech(settings, budget),
             protection=build_protection(settings),
             docs_enabled=settings.app_env != "production",
             ready_check=database.ping,
             log_tracebacks=settings.log_tracebacks,
         )
     catalog, appointments = build_seed(system_clock(), system_clock)
+    # In memory the ledger is in memory too (local development and rehearsals): same rules, and
+    # production never gets here with a provider enabled (configuration refuses it).
+    budget = (
+        BudgetGuard.from_settings(InMemoryBudgetLedger(), system_clock, settings)
+        if settings.budget_enforced
+        else None
+    )
     return create_app(
         catalog,
         appointments,
         system_clock,
         signing_key=key,
-        agent=build_agent(settings, catalog, appointments, key),
-        speech=build_speech(settings),
+        agent=build_agent(settings, catalog, appointments, key, budget),
+        speech=build_speech(settings, budget),
         protection=build_protection(settings),
         docs_enabled=settings.app_env != "production",
         log_tracebacks=settings.log_tracebacks,

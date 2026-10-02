@@ -294,7 +294,14 @@ _AGENT_TURN_ERRORS: dict[int | str, dict[str, Any]] = {
         "description": "agent_busy.",
         "headers": _retry_after("Seconds to wait before retrying."),
     },
-    503: {"model": ErrorResponse, "description": "agent_unavailable: no provider is configured."},
+    503: {
+        "model": ErrorResponse,
+        "description": (
+            "agent_unavailable (no provider is configured), demo_budget_reached (today's "
+            "allowance is used up), budget_unavailable (the budget could not be checked) or "
+            "service_draining (the process is shutting down). The provider was not called."
+        ),
+    },
 }
 
 

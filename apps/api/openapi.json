@@ -1412,7 +1412,7 @@
                 }
               }
             },
-            "description": "agent_unavailable: no provider is configured."
+            "description": "agent_unavailable (no provider is configured), demo_budget_reached (today's allowance is used up), budget_unavailable (the budget could not be checked) or service_draining (the process is shutting down). The provider was not called."
           }
         },
         "summary": "Create Agent Turn",
@@ -1897,7 +1897,7 @@
                 }
               }
             },
-            "description": "speech_unavailable: no provider is configured."
+            "description": "speech_unavailable (no provider is configured), demo_budget_reached, budget_unavailable or service_draining. The provider was not called."
           },
           "504": {
             "content": {
