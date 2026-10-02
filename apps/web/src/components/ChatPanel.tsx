@@ -566,11 +566,16 @@ export function ChatPanel({ initialDraft = "" }: { initialDraft?: string }) {
               event.preventDefault();
               submit();
             }}
-            className="z-10 border-t-2 border-bottle bg-primer px-4 py-3 sm:px-6 [@media(min-height:44rem)]:sticky [@media(min-height:44rem)]:bottom-0"
+            className="z-10 border-t-2 border-bottle bg-primer px-4 py-3 sm:px-6 [@media(min-width:48rem)_and_(min-height:44rem)]:sticky [@media(min-width:48rem)_and_(min-height:44rem)]:bottom-0"
           >
-            <label htmlFor="message" className="text-sm font-bold">
-              Your message
-            </label>
+            <div className="flex flex-wrap items-baseline justify-between gap-x-4">
+              <label htmlFor="message" className="text-sm font-bold">
+                Your message
+              </label>
+              <p id="message-count" className="text-sm">
+                {draft.length} of {MAX_MESSAGE_LENGTH} characters
+              </p>
+            </div>
             {draft !== "" && draft === initialDraft && turns.length === 0 ? (
               <p className="text-sm">
                 Prepared from the page you came from. Change it or send it as it
@@ -597,15 +602,10 @@ export function ChatPanel({ initialDraft = "" }: { initialDraft?: string }) {
               aria-invalid={phase.kind === "invalid" || undefined}
               className="mt-1 block w-full resize-y border-2 border-bottle bg-white px-3 py-2 text-lg"
             />
-            <div className="mt-1 flex flex-wrap justify-between gap-x-4 text-sm">
-              <p id="message-help">
-                Enter sends, Shift and Enter adds a line. Plain text only, and
-                please don&apos;t type personal details.
-              </p>
-              <p id="message-count">
-                {draft.length} of {MAX_MESSAGE_LENGTH} characters
-              </p>
-            </div>
+            <p id="message-help" className="mt-1 text-sm">
+              Enter sends, Shift and Enter adds a line. Please don&apos;t type
+              personal details.
+            </p>
             {shortened ? (
               <p role="status" className="text-sm font-bold">
                 The transcript was shortened to fit {MAX_MESSAGE_LENGTH}{" "}
@@ -622,27 +622,27 @@ export function ChatPanel({ initialDraft = "" }: { initialDraft?: string }) {
                 Write a message of 1 to {MAX_MESSAGE_LENGTH} characters.
               </div>
             ) : null}
-            <div className="mt-3 flex flex-wrap items-start gap-x-4 gap-y-3">
-              <VoiceInput
-                controlRef={voice}
-                onRecordingStart={onRecordingStart}
-                onTranscript={addTranscript}
-                onReviewChange={setReviewing}
-                disabled={sending || phase.kind === "unavailable"}
-              />
-              <button
-                type="submit"
-                disabled={sending || phase.kind === "unavailable"}
-                aria-busy={sending}
-                className={`${buttonClass} ml-auto`}
-              >
-                {sending
-                  ? "Sending…"
-                  : transcriptReady
-                    ? "Send transcript"
-                    : "Send message"}
-              </button>
-            </div>
+            <VoiceInput
+              controlRef={voice}
+              onRecordingStart={onRecordingStart}
+              onTranscript={addTranscript}
+              onReviewChange={setReviewing}
+              disabled={sending || phase.kind === "unavailable"}
+              actions={
+                <button
+                  type="submit"
+                  disabled={sending || phase.kind === "unavailable"}
+                  aria-busy={sending}
+                  className={buttonClass}
+                >
+                  {sending
+                    ? "Sending…"
+                    : transcriptReady
+                      ? "Send transcript"
+                      : "Send message"}
+                </button>
+              }
+            />
             {turns.length > 0 && !sending ? (
               <p className="mt-2">
                 <button

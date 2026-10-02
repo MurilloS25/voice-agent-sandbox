@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
+  type ReactNode,
   type Ref,
 } from "react";
 
@@ -141,6 +142,8 @@ type VoiceInputProps = {
   onRecordingStart?: () => void;
   /** True while a transcript is in the box waiting for the visitor to check and send it. */
   onReviewChange?: (reviewing: boolean) => void;
+  /** The page's own send button, placed at the end of the controls row. */
+  actions?: ReactNode;
   disabled?: boolean;
   controlRef?: Ref<VoiceControl>;
 };
@@ -149,6 +152,7 @@ export function VoiceInput({
   onTranscript,
   onRecordingStart,
   onReviewChange,
+  actions,
   disabled = false,
   controlRef,
 }: VoiceInputProps) {
@@ -339,19 +343,18 @@ export function VoiceInput({
 
   if (!supported || state.kind === "unsupported") {
     return (
-      <p className="mt-3 max-w-prose text-sm">
-        Voice input isn&apos;t available in this browser. You can type your
-        message.
-      </p>
+      <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+        <p className="min-w-0 flex-1 basis-56 text-sm">
+          Voice input isn&apos;t available in this browser. You can type your
+          message.
+        </p>
+        {actions}
+      </div>
     );
   }
 
   return (
-    <div
-      role="group"
-      aria-label="Voice input"
-      className="min-w-0 flex-1 basis-64 space-y-3"
-    >
+    <div role="group" aria-label="Voice input" className="mt-3 space-y-2">
       <div className="flex flex-wrap items-center gap-3">
         {recording ? (
           <button type="button" onClick={stop} className={buttonClass}>
@@ -417,6 +420,8 @@ export function VoiceInput({
             </span>
           </p>
         ) : null}
+
+        {actions ? <div className="ml-auto">{actions}</div> : null}
       </div>
 
       {state.kind === "denied" ? (
@@ -447,9 +452,9 @@ export function VoiceInput({
       ) : null}
 
       <p id="voice-help" className="text-sm">
-        Speak sends one short recording (up to 15 seconds) to a transcription
-        service to turn it into text. This app doesn&apos;t store it, and the
-        text appears in your message for you to check before you send it.
+        Speak sends a recording of up to 15 seconds to a transcription service
+        to turn it into text. This app doesn&apos;t store it, and you check the
+        text before you send it.
       </p>
 
       <p
