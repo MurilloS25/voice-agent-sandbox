@@ -12,6 +12,7 @@ import base64
 import binascii
 import logging
 import os
+import re
 import secrets
 from typing import Literal
 
@@ -58,6 +59,29 @@ class Settings(BaseSettings):
     db_lock_timeout_ms: int = Field(1000, ge=100, le=30000)
     db_idle_in_transaction_timeout_ms: int = Field(5000, ge=100, le=60000)
 
+    # Agent turn budget (plan 0003). The defaults are pinned by tests/test_timeout_budget.py.
+    agent_turn_deadline_s: float = Field(20.0, gt=1, le=60)
+    agent_model_timeout_s: float = Field(8.0, gt=0, le=60)
+    agent_tool_timeout_s: float = Field(7.5, gt=0, le=60)
+
+    # Model provider. `disabled` is the default: the app and `secrets check` then need neither a
+    # key nor a model, and `POST /v1/agent/turns` answers 503. There is no default model id: it is
+    # chosen from the provider's current documentation (ADR 0008) and set in the environment.
+    agent_provider: Literal["disabled", "groq"] = "disabled"
+    groq_api_key: SecretStr | None = None
+    agent_model: str | None = None
+    agent_temperature: float = Field(0.0, ge=0, le=2)
+    agent_max_output_tokens: int = Field(512, ge=16, le=8192)
+    # `off` sends no reasoning-effort parameter.
+    agent_reasoning_effort: Literal["off", "low", "medium", "high", "none", "default"] = "low"
+    # How model reasoning is kept out of the response: `include_reasoning` sends
+    # include_reasoning=false (the gpt-oss family), `reasoning_format` sends
+    # reasoning_format=hidden (the qwen family), `none` sends nothing. Reasoning is also dropped
+    # by the agent whatever this is set to.
+    agent_reasoning_control: Literal["include_reasoning", "reasoning_format", "none"] = (
+        "include_reasoning"
+    )
+
 
 def decode_signing_key(value: str) -> bytes:
     """Decode a base64url key and reject weak ones. Raises ValueError (never shown to users)."""
@@ -98,6 +122,25 @@ def _configured_key(settings: Settings) -> SecretStr | None:
     return key
 
 
+_MODEL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/:-]{0,99}")
+
+
+def failed_agent_settings(settings: Settings) -> list[str]:
+    """Names of invalid provider settings. Only when a provider is selected: with `disabled`
+    nothing is required (placeholders in `.env` are fine). No key format is assumed, only that it
+    is present, not a placeholder and has no whitespace."""
+    if settings.agent_provider == "disabled":
+        return []
+    failed: list[str] = []
+    key = settings.groq_api_key
+    if not _usable_secret(key) or (key is not None and re.search(r"\s", key.get_secret_value())):
+        failed.append("GROQ_API_KEY")
+    model = settings.agent_model
+    if not model or _PLACEHOLDER in model.upper() or not _MODEL_ID.fullmatch(model):
+        failed.append("AGENT_MODEL")
+    return failed
+
+
 def failed_settings(settings: Settings) -> list[str]:
     failed: list[str] = []
     key = _configured_key(settings)
@@ -109,6 +152,8 @@ def failed_settings(settings: Settings) -> list[str]:
             decode_signing_key(key.get_secret_value())
         except ValueError:
             failed.append("PROPOSAL_SIGNING_KEY")
+
+    failed.extend(failed_agent_settings(settings))
 
     if settings.appointment_store == "postgres":
         if not settings.db_host or _PLACEHOLDER in settings.db_host.upper():

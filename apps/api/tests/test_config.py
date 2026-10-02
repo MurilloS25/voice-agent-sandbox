@@ -26,6 +26,16 @@ ENV_NAMES = [
     *(f"DB_{n}" for n in ("HOST", "PORT", "NAME", "USER", "PASSWORD", "SSLMODE", "SSLROOTCERT")),
     "DB_ALLOW_REQUIRE_SSLMODE",
     "DB_POOL_MAX",
+    "AGENT_TURN_DEADLINE_S",
+    "AGENT_MODEL_TIMEOUT_S",
+    "AGENT_TOOL_TIMEOUT_S",
+    "AGENT_PROVIDER",
+    "AGENT_MODEL",
+    "GROQ_API_KEY",
+    "AGENT_TEMPERATURE",
+    "AGENT_MAX_OUTPUT_TOKENS",
+    "AGENT_REASONING_EFFORT",
+    "AGENT_REASONING_CONTROL",
 ]
 
 
@@ -154,3 +164,121 @@ def test_the_env_file_variable_can_disable_the_file(
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("VOICE_AGENT_ENV_FILE", "")
     assert load_settings().appointment_store == "memory"
+
+
+def test_agent_budget_defaults_and_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = Settings(_env_file=None)
+    assert (
+        settings.agent_turn_deadline_s,
+        settings.agent_model_timeout_s,
+        settings.agent_tool_timeout_s,
+    ) == (20.0, 8.0, 7.5)
+
+    monkeypatch.setenv("AGENT_TURN_DEADLINE_S", "12")
+    assert Settings(_env_file=None).agent_turn_deadline_s == 12.0
+    monkeypatch.delenv("AGENT_TURN_DEADLINE_S")
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("AGENT_TURN_DEADLINE_S", "0.5"),
+        ("AGENT_TURN_DEADLINE_S", "600"),
+        ("AGENT_MODEL_TIMEOUT_S", "0"),
+        ("AGENT_TOOL_TIMEOUT_S", "-1"),
+    ],
+)
+def test_agent_budget_out_of_range_is_a_generic_config_error(
+    monkeypatch: pytest.MonkeyPatch, name: str, value: str
+) -> None:
+    monkeypatch.setenv(name, value)
+    with pytest.raises(ConfigError) as caught:
+        load_settings(env_file="")
+    assert str(caught.value) == GENERIC
+    assert value not in str(caught.value)
+
+
+def test_the_agent_is_disabled_by_default_and_needs_nothing() -> None:
+    settings = validate_settings(Settings(_env_file=None))
+    assert settings.agent_provider == "disabled"
+    assert settings.groq_api_key is None and settings.agent_model is None
+
+
+def groq_settings(**overrides: object) -> Settings:
+    values: dict[str, object] = {
+        "agent_provider": "groq",
+        "groq_api_key": SecretStr("fake-offline-credential-for-tests-0001"),
+        "agent_model": "some/model-id",
+    }
+    values.update(overrides)
+    return Settings(_env_file=None, **values)  # type: ignore[arg-type]
+
+
+def test_a_complete_provider_selection_passes() -> None:
+    assert validate_settings(groq_settings()).agent_provider == "groq"
+
+
+def test_placeholders_do_not_matter_while_the_provider_is_disabled() -> None:
+    settings = Settings(
+        _env_file=None,
+        groq_api_key=SecretStr("CHANGE_ME"),
+        agent_model="CHANGE_ME",
+    )
+    assert validate_settings(settings).agent_provider == "disabled"
+
+
+@pytest.mark.parametrize(
+    ("overrides", "expected"),
+    [
+        ({"groq_api_key": None}, ["GROQ_API_KEY"]),
+        ({"groq_api_key": SecretStr("")}, ["GROQ_API_KEY"]),
+        ({"groq_api_key": SecretStr("CHANGE_ME")}, ["GROQ_API_KEY"]),
+        ({"groq_api_key": SecretStr("two words")}, ["GROQ_API_KEY"]),
+        ({"groq_api_key": SecretStr("line\nbreak")}, ["GROQ_API_KEY"]),
+        ({"agent_model": None}, ["AGENT_MODEL"]),
+        ({"agent_model": ""}, ["AGENT_MODEL"]),
+        ({"agent_model": "CHANGE_ME"}, ["AGENT_MODEL"]),
+        ({"agent_model": "bad model!"}, ["AGENT_MODEL"]),
+        ({"groq_api_key": None, "agent_model": None}, ["GROQ_API_KEY", "AGENT_MODEL"]),
+    ],
+)
+def test_a_selected_provider_fails_closed_naming_only_the_setting(
+    overrides: dict[str, object],
+    expected: list[str],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.DEBUG, logger="voice_agent_api")
+    with pytest.raises(ConfigError) as caught:
+        validate_settings(groq_settings(**overrides))
+
+    assert str(caught.value) == GENERIC
+    logged = " ".join(r.getMessage() for r in caplog.records)
+    for name in expected:
+        assert name in logged
+    for value in ("fake-offline-credential", "some/model-id", "two words", "bad model"):
+        assert value not in logged
+
+
+def test_the_provider_key_never_appears_in_repr() -> None:
+    settings = groq_settings()
+    assert "fake-offline-credential" not in repr(settings)
+    assert "fake-offline-credential" not in str(settings)
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("AGENT_PROVIDER", "openai"),
+        ("AGENT_TEMPERATURE", "5"),
+        ("AGENT_MAX_OUTPUT_TOKENS", "1"),
+        ("AGENT_REASONING_EFFORT", "extreme"),
+        ("AGENT_REASONING_CONTROL", "magic"),
+    ],
+)
+def test_invalid_provider_options_are_a_generic_config_error(
+    monkeypatch: pytest.MonkeyPatch, name: str, value: str
+) -> None:
+    monkeypatch.setenv(name, value)
+    with pytest.raises(ConfigError) as caught:
+        load_settings(env_file="")
+    assert str(caught.value) == GENERIC

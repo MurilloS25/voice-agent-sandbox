@@ -8,6 +8,7 @@ from uuid import UUID
 
 from fastapi import Depends, Request
 
+from voice_agent_api.agent.orchestrator import AgentService
 from voice_agent_api.api.proposal_tokens import ProposalTokenCodec
 from voice_agent_api.domain.ports import AppointmentBook, BusinessCatalog
 
@@ -35,6 +36,12 @@ def get_id_factory(request: Request) -> IdFactory:
     return cast(IdFactory, request.app.state.id_factory)
 
 
+def get_agent(request: Request) -> AgentService | None:
+    """None when no provider is configured: the route answers 503 `agent_unavailable`."""
+    return cast(AgentService | None, request.app.state.agent)
+
+
+AgentDep = Annotated[AgentService | None, Depends(get_agent)]
 CatalogDep = Annotated[BusinessCatalog, Depends(get_catalog)]
 AppointmentsDep = Annotated[AppointmentBook, Depends(get_appointments)]
 ClockDep = Annotated[Clock, Depends(get_clock)]

@@ -14,13 +14,17 @@ from uuid import UUID
 from fastapi import APIRouter, Query, Response
 from pydantic import BeforeValidator
 
+from voice_agent_api.agent.contracts import AgentTurnRequest, AgentTurnResponse
+from voice_agent_api.agent.errors import AgentUnavailable
 from voice_agent_api.api.dependencies import (
+    AgentDep,
     AppointmentsDep,
     CatalogDep,
     ClockDep,
     IdFactoryDep,
     TokenCodecDep,
 )
+from voice_agent_api.api.mappers import proposal_response, service_response
 from voice_agent_api.api.schemas import (
     AppointmentProposalRequest,
     AppointmentProposalResponse,
@@ -34,14 +38,13 @@ from voice_agent_api.api.schemas import (
     HealthResponse,
     MoneyResponse,
     OpeningIntervalResponse,
-    ServiceResponse,
     ServicesResponse,
     SlotResponse,
 )
 from voice_agent_api.domain.availability import booking_window
 from voice_agent_api.domain.commands import confirm_appointment, propose_appointment
 from voice_agent_api.domain.errors import AppointmentNotFound
-from voice_agent_api.domain.models import Appointment, Service
+from voice_agent_api.domain.models import Appointment
 from voice_agent_api.domain.queries import query_availability
 
 router = APIRouter()
@@ -99,18 +102,6 @@ _GET_APPOINTMENT_ERRORS: dict[int | str, dict[str, Any]] = {
     422: {"model": ErrorResponse, "description": "Invalid appointment id."},
     503: {"model": ErrorResponse, "description": "Storage unavailable."},
 }
-
-
-def _service_response(service: Service) -> ServiceResponse:
-    return ServiceResponse(
-        id=service.id,
-        name=service.name,
-        description=service.description,
-        duration_minutes=int(service.duration.total_seconds() // 60),
-        price=MoneyResponse(
-            amount_minor=service.price.amount_minor, currency=service.price.currency
-        ),
-    )
 
 
 def _appointment_response(appointment: Appointment) -> AppointmentResponse:
@@ -183,7 +174,7 @@ def read_business(catalog: CatalogDep, clock: ClockDep) -> BusinessResponse:
     responses={503: {"model": ErrorResponse, "description": "Storage unavailable."}},
 )
 def list_services(catalog: CatalogDep) -> ServicesResponse:
-    return ServicesResponse(services=[_service_response(s) for s in catalog.services()])
+    return ServicesResponse(services=[service_response(s) for s in catalog.services()])
 
 
 @router.get(
@@ -225,15 +216,7 @@ def create_appointment_proposal(
 ) -> AppointmentProposalResponse:
     """Describe what booking this slot would do. Nothing is saved."""
     review = propose_appointment(appointments, body.service_id, body.start, clock(), new_id)
-    return AppointmentProposalResponse(
-        proposal_token=codec.encode(review.proposal),
-        expires_at=review.proposal.expires_at,
-        service=_service_response(review.service),
-        start=review.proposal.start,
-        end=review.end,
-        timezone=review.timezone,
-        customer_alias=review.customer_alias,
-    )
+    return proposal_response(review, codec.encode(review.proposal))
 
 
 @router.post(
@@ -262,6 +245,51 @@ def confirm_appointment_route(
         appointment.id,
     )
     return _appointment_response(appointment)
+
+
+def _retry_after(description: str) -> dict[str, Any]:
+    return {
+        "Retry-After": {
+            "description": description,
+            "schema": {"type": "integer"},
+        }
+    }
+
+
+_AGENT_TURN_ERRORS: dict[int | str, dict[str, Any]] = {
+    404: {"model": ErrorResponse, "description": "conversation_not_found."},
+    409: {
+        "model": ErrorResponse,
+        "description": (
+            "idempotency_key_reused, turn_in_progress, conversation_busy, turn_out_of_order "
+            "or conversation_limit_reached. Nothing was accepted. `turn_in_progress` and "
+            "`conversation_busy` send Retry-After."
+        ),
+        "headers": _retry_after("Seconds to wait before retrying (turn_in_progress, busy)."),
+    },
+    410: {"model": ErrorResponse, "description": "conversation_expired."},
+    422: {"model": ErrorResponse, "description": "validation_error."},
+    429: {
+        "model": ErrorResponse,
+        "description": "agent_busy.",
+        "headers": _retry_after("Seconds to wait before retrying."),
+    },
+    503: {"model": ErrorResponse, "description": "agent_unavailable: no provider is configured."},
+}
+
+
+@router.post(
+    "/v1/agent/turns",
+    response_model=AgentTurnResponse,
+    tags=["agent"],
+    responses=_AGENT_TURN_ERRORS,
+)
+def create_agent_turn(body: AgentTurnRequest, agent: AgentDep) -> AgentTurnResponse:
+    """One conversational turn. Idempotent per `client_turn_id` while the API process retains
+    the conversation. The assistant can only read and prepare a review; it cannot book."""
+    if agent is None:
+        raise AgentUnavailable
+    return agent.handle_turn(body)
 
 
 @router.get(

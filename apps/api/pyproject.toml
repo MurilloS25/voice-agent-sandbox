@@ -6,6 +6,9 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "fastapi[standard]>=0.142.2",
+    "langchain-core~=1.6.6",
+    "langchain-groq~=1.1.3",
+    "langgraph~=1.2.12",
     "psycopg[binary,pool]>=3.3.6",
     "pydantic-settings>=2.15.0",
     "tzdata>=2026.4",
@@ -38,6 +41,7 @@ files = ["src", "tests"]
 testpaths = ["tests"]
 markers = [
     "integration: needs a real PostgreSQL database (apps/api/.env). Run with `-m integration`.",
+    "provider: calls the real model provider (needs RUN_LIVE_PROVIDER_EVALS=1 and a key). Run with `-m provider`.",
 ]
-# Integration tests write to a real database, so they never run unless asked for.
-addopts = '-m "not integration"'
+# Integration and provider tests touch real services, so they never run unless asked for.
+addopts = '-m "not integration and not provider"'

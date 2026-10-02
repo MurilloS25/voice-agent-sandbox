@@ -8,6 +8,10 @@ from uuid import UUID, uuid4
 from fastapi import FastAPI
 from starlette.concurrency import run_in_threadpool
 
+from voice_agent_api.agent.limits import AgentLimits
+from voice_agent_api.agent.orchestrator import AgentService
+from voice_agent_api.agent.providers import build_chat_model
+from voice_agent_api.agent.store import InMemoryConversationStore
 from voice_agent_api.api.dependencies import Clock
 from voice_agent_api.api.errors import register_error_handlers
 from voice_agent_api.api.proposal_tokens import ProposalTokenCodec
@@ -41,15 +45,25 @@ def create_app(
     signing_key: bytes | None = None,
     id_factory: Callable[[], UUID] = uuid4,
     resources: Sequence[Lifecycle] = (),
+    agent: AgentService | None = None,
 ) -> FastAPI:
-    """Build the app from explicit parts. Nothing here connects to anything."""
+    """Build the app from explicit parts. Nothing here connects to anything.
+
+    `agent` is None when no model provider is configured: `POST /v1/agent/turns` then answers 503
+    `agent_unavailable` and everything else works as before. A given agent is opened and closed
+    with the app's lifespan, like `resources`."""
+
+    # The agent owns a call pool that must be closed at shutdown, so it is always managed here.
+    managed: list[Lifecycle] = [*resources]
+    if agent is not None and agent not in managed:
+        managed.append(agent)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         # Opening and closing a pool blocks, so both go through the worker threadpool.
         opened: list[Lifecycle] = []
         try:
-            for resource in resources:
+            for resource in managed:
                 await run_in_threadpool(resource.open)
                 opened.append(resource)
             yield
@@ -72,9 +86,30 @@ def create_app(
     app.state.clock = clock
     app.state.token_codec = ProposalTokenCodec(key)
     app.state.id_factory = id_factory
+    app.state.agent = agent
     register_error_handlers(app)
     app.include_router(router)
     return app
+
+
+def build_agent(
+    settings: Settings, catalog: BusinessCatalog, appointments: AppointmentBook, key: bytes
+) -> AgentService | None:
+    """The agent for the configured provider, or None when it is disabled (the default).
+    Construction makes no network call."""
+    model = build_chat_model(settings)
+    if model is None:
+        return None
+    return AgentService(
+        store=InMemoryConversationStore(system_clock),
+        model=model,
+        catalog=catalog,
+        appointments=appointments,
+        new_id=uuid4,
+        encode=ProposalTokenCodec(key).encode,
+        clock=system_clock,
+        limits=AgentLimits.from_settings(settings),
+    )
 
 
 def create_app_from_settings(settings: Settings) -> FastAPI:
@@ -83,7 +118,22 @@ def create_app_from_settings(settings: Settings) -> FastAPI:
         # Imported here so memory mode and OpenAPI generation never need a database.
         from voice_agent_api.infrastructure.postgres import build_postgres
 
+        # `database` is not opened until the app starts, so a failure while building the agent
+        # (a ConfigError, already ruled out by validation) leaves nothing connected.
         pg_catalog, pg_book, database = build_postgres(settings)
-        return create_app(pg_catalog, pg_book, system_clock, signing_key=key, resources=(database,))
+        return create_app(
+            pg_catalog,
+            pg_book,
+            system_clock,
+            signing_key=key,
+            resources=(database,),
+            agent=build_agent(settings, pg_catalog, pg_book, key),
+        )
     catalog, appointments = build_seed(system_clock(), system_clock)
-    return create_app(catalog, appointments, system_clock, signing_key=key)
+    return create_app(
+        catalog,
+        appointments,
+        system_clock,
+        signing_key=key,
+        agent=build_agent(settings, catalog, appointments, key),
+    )

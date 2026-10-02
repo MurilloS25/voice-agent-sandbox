@@ -45,6 +45,18 @@ describe("ConfirmForm", () => {
     );
   });
 
+  it("keeps the button inside a 320 px screen with 200% text", () => {
+    // Fixed 2 rem side padding is 64 px per side at 200% text and pushed the button past the
+    // viewport inside the chat's nested review block; the padding is now smaller on small screens.
+    setup();
+    const classes = screen
+      .getByRole("button", { name: "Confirm booking" })
+      .className.split(/\s+/);
+    expect(classes).not.toContain("px-8");
+    expect(classes).toContain("px-4");
+    expect(classes).toContain("sm:px-8");
+    expect(classes).toContain("max-w-full");
+  });
   it("sends the token only when the user presses the button", async () => {
     confirmBooking.mockResolvedValue({ kind: "idle" });
     setup();

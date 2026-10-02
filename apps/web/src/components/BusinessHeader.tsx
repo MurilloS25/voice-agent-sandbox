@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 import type { Business } from "@/lib/api/client";
 
 import { Wheel } from "./Wheel";
@@ -28,6 +30,14 @@ export function BusinessHeader({ business }: { business: Business }) {
             </a>
           </p>
         </address>
+        <p className="mt-8">
+          <Link
+            href="/assistant"
+            className="inline-block min-h-12 bg-bottle px-6 py-3 text-lg font-bold text-primer hover:bg-moss"
+          >
+            Ask the assistant
+          </Link>
+        </p>
         <p className="mt-8 max-w-md text-base">
           This is a fictional business built for a software demo. You can pick
           an open time below and review a booking, but nothing here is real and

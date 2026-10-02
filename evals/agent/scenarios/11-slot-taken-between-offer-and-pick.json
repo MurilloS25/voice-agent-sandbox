@@ -1,0 +1,39 @@
+{
+  "id": "11-slot-taken-between-offer-and-pick",
+  "category": "recovery",
+  "description": "Another customer takes the offered time before the visitor picks it; the assistant recovers.",
+  "turns": [
+    {
+      "user": "Times for a flat repair on Tuesday October 6?",
+      "script": [
+        {
+          "tool_calls": [
+            { "name": "find_available_slots", "args": { "service_id": "flat-repair", "date": "2026-10-06" } }
+          ]
+        },
+        { "text": "S1 is 09:00." }
+      ],
+      "expect": { "outcome": "completed", "tools_called_in_order": ["find_available_slots"] }
+    },
+    {
+      "before": [{ "fill_slot": { "service_id": "flat-repair", "start": "2026-10-06T13:00:00Z" } }],
+      "user": "The first one.",
+      "script": [
+        { "tool_calls": [{ "name": "prepare_booking_review", "args": { "slot_id": "S1" } }] },
+        {
+          "tool_calls": [
+            { "name": "find_available_slots", "args": { "service_id": "flat-repair", "date": "2026-10-06" } }
+          ]
+        },
+        { "text": "That time was just taken. Here are other times: S1 is 09:30." }
+      ],
+      "expect": {
+        "outcome": "completed",
+        "tools_called_in_order": ["prepare_booking_review", "find_available_slots"],
+        "tool_result_codes": ["slot_unavailable", null],
+        "review_ready": false,
+        "reply_should_mention_any": ["taken"]
+      }
+    }
+  ]
+}
