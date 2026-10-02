@@ -19,6 +19,7 @@ export type Appointment = components["schemas"]["AppointmentResponse"];
 export type AgentTurnRequest = components["schemas"]["AgentTurnRequest"];
 export type AgentTurn = components["schemas"]["AgentTurnResponse"];
 export type TimelineEvent = AgentTurn["events"][number];
+export type Transcription = components["schemas"]["TranscriptionResponse"];
 
 export type ApiResult<T> =
   | { kind: "ok"; data: T }
@@ -48,6 +49,10 @@ export const MUTATION_TIMEOUT_MS = 15000;
 // apps/api/src/voice_agent_api/agent/limits.py); this adds the same 5 s margin as the booking
 // requests. tests/test_timeout_budget.py in the API fails if the two sides drift apart.
 export const AGENT_TURN_TIMEOUT_MS = 26000;
+// One transcription. The API bounds a request at 9 s (3 s to read the body plus 6 s for the
+// provider, see apps/api/src/voice_agent_api/speech/limits.py); this adds the same 5 s margin.
+// tests/speech/test_budget.py in the API fails if the two sides drift apart.
+export const SPEECH_TIMEOUT_MS = 14000;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const INSTANT_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
 const SERVICE_ID_PATTERN = /^[a-z0-9-]+$/;
@@ -285,4 +290,57 @@ export async function sendAgentTurn(
     };
   }
   return result;
+}
+
+/**
+ * One short recording, sent as the raw request body. Call it from a route handler only (the
+ * browser never talks to the API). The caller's `signal` is forwarded to the fetch, so a client
+ * that goes away really cancels the request. The audio is never logged or stored.
+ *
+ * Unlike `request`, a 502 or 504 is read like any other answer here: the speech route uses them
+ * for `transcription_failed` and `transcription_timeout`, with a JSON error body.
+ */
+export async function sendTranscription(
+  audio: Uint8Array,
+  contentType: string,
+  signal?: AbortSignal,
+): Promise<ApiResult<Transcription>> {
+  const timeout = AbortSignal.timeout(SPEECH_TIMEOUT_MS);
+  let response: Response;
+  try {
+    response = await fetch(`${baseUrl()}/v1/speech/transcriptions`, {
+      method: "POST",
+      cache: "no-store",
+      headers: { accept: "application/json", "content-type": contentType },
+      body: audio as BodyInit,
+      signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+    });
+  } catch {
+    return { kind: "unavailable" };
+  }
+
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch {
+    return {
+      kind: "error",
+      status: response.status,
+      code: "invalid_response",
+      message: "The speech service returned a response that could not be read.",
+    };
+  }
+  if (!response.ok) {
+    return errorResult(response.status, payload, retryAfter(response));
+  }
+  const text = (payload as { text?: unknown } | null)?.text;
+  if (typeof text !== "string") {
+    return {
+      kind: "error",
+      status: response.status,
+      code: "invalid_response",
+      message: "The speech service returned a response that could not be read.",
+    };
+  }
+  return { kind: "ok", data: payload as Transcription };
 }

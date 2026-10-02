@@ -1,6 +1,6 @@
 # Plan 0004 — Voice experience
 
-Status: accepted; implementation in progress. Phases 4A (contracts, limits and STT port) and 4B (adapters and configuration) are done; 4C to 4E are being implemented offline; 4F (checkpoints C1 to C3) has not started. The branch is `feature/voice-experience`, created from `5b08ef0` (a squash commit with a single parent, `253fb59`; PR #2 is merged). Research sources were consulted on 2026-10-01 and are listed at the end.
+Status: accepted; implementation in progress. Phases 4A (contracts, limits and STT port), 4B (adapters and configuration) and 4C (capture and transcription in the web app) are done; 4D and 4E are being implemented offline; 4F (checkpoints C1 to C3) has not started. The branch is `feature/voice-experience`, created from `5b08ef0` (a squash commit with a single parent, `253fb59`; PR #2 is merged). Research sources were consulted on 2026-10-01 and are listed at the end.
 
 # Outcome
 
@@ -12,7 +12,7 @@ Included:
 
 - A provider-neutral speech-to-text (STT) port, an offline scripted fake and an optional Groq adapter, disabled by default.
 - `POST /v1/speech/transcriptions`: one short audio clip in, one transcript out. It does not call the agent.
-- A Server Action and a client-side capture adapter in the web app, with an accessible Speak/Stop control, an editable transcript and clear failure states.
+- A same-origin route handler (see the transport deviation under 4C) and a client-side capture adapter in the web app, with an accessible Speak/Stop control, an editable transcript and clear failure states.
 - Browser SpeechSynthesis for spoken replies: a per-reply Listen/Stop button and an opt-in "Read replies aloud" switch, off by default.
 - Tests, fixtures, documentation (HARNESS, ARCHITECTURE, README, ADR 0009) and a security review.
 - An opt-in live STT check and one real end-to-end run, each behind its own approval.
@@ -33,7 +33,7 @@ Excluded (kept out on purpose):
 Browser: Speak ─ getUserMedia + MediaRecorder (client timer stops at 15 s) ─ Stop
    │  one Blob in memory (never stored; released after upload)
    ▼
-Server Action transcribeAudio (Next.js server, FormData → raw bytes, 14 s timeout)
+Route handler POST /api/voice/transcribe (same origin; raw bytes, 14 s timeout; request.signal forwarded)
    ▼
 POST /v1/speech/transcriptions   (async route; reads request.stream() incrementally)
    │  counts bytes, cuts at 512 KB → 413; checks declared type + magic bytes
@@ -96,7 +96,7 @@ Timeout budget (a test recomputes it from the real defaults, as in `tests/test_t
 | Body read (whole stream) | 3 s |
 | Provider wait `SPEECH_TIMEOUT_S` (also the SDK `timeout`; `max_retries=0`) | 6 s |
 | Route bound (read + provider) | 9 s |
-| Web Server Action / fetch timeout (bound + the same 5 s margin as ADR 0007) | 14 s |
+| Web route handler's call to the API (`SPEECH_TIMEOUT_MS`; bound + the same 5 s margin as ADR 0007) | 14 s |
 | In-flight transcriptions (semaphore) | 2 |
 
 ## Request handling, event loop and cancellation
@@ -142,7 +142,7 @@ Spoken output:
 3. No raw audio is persisted: nothing is written to disk, a database, logs, browser storage or events; `tempfile` is patched to fail in tests.
 4. Audio and transcripts are never logged; logs carry only outcome, byte count and timings. `exc_info` never records transcribed text, provider payloads, audio, keys or HTTP bodies.
 5. No SDK exception reaches the client; public errors are fixed and typed.
-6. No key in the client or in any Server Action result; no tracing.
+6. No key or API address in the client or in any route handler or Server Action result; no tracing.
 7. Nothing plays or records without a visitor action.
 8. The server states only what it enforces (bytes, type family, concurrency, time), never audio duration.
 
@@ -152,7 +152,10 @@ Each slice is a vertical, tested change; a checkpoint (marked **Stop**) is a poi
 
 - **4A Contracts, limits and port.** `apps/api/src/voice_agent_api/speech/{__init__,contracts,ports,errors,limits,sniff,bounded}.py`; the async route and fixed errors in `api/routes.py`, `api/errors.py`, `api/schemas.py`; dependency in `api/dependencies.py`; `openapi.json` and `schema.d.ts` regenerated. Tests in `tests/speech/` with a scripted port (no provider code yet).
 - **4B Adapters and configuration.** `speech/fake.py` (scripted), `speech/providers.py` (the only module importing the Groq SDK, lazily; pinned base URL, `max_retries=0`, tracing refused), settings and validation in `config.py`, wiring in `factory.py`, `devtools/secrets.py` (`check`), `.env.example`, ADR 0009. Adapter tests use a mock HTTP transport. No new dependency is expected: the installed `groq` 0.37.1 provides `audio.transcriptions.create`; `python-multipart` is not used by the route. **Stop** before installing anything, if a dependency does turn out to be needed.
-- **4C Capture and UX.** `apps/web/src/lib/voice/capture.ts`, `src/components/VoiceInput.tsx`, `src/app/assistant/transcribe.ts` (Server Action), `client.ts` (`transcribeAudio`, 14 s), integration in `ChatPanel`, `state.ts` types, `next.config.ts` only if the 1 MB action limit proves insufficient (it should not: 15 s of Opus is about 30–60 KB).
+- **4C Capture and UX.** Done. `apps/web/src/lib/voice/{limits,capture,transcribe}.ts`, `src/components/VoiceInput.tsx`, `src/app/api/voice/transcribe/route.ts`, `sendTranscription` and `SPEECH_TIMEOUT_MS = 14000` in `src/lib/api/client.ts`, integration in `ChatPanel`, test fakes in `src/test/voice-fakes.ts`.
+  - **Deviation (pre-authorized only for real cancellation): a same-origin route handler instead of a Server Action.** The plan named a Server Action `transcribeAudio`. Checking the installed Next.js 16.3.7 showed that a started Server Action cannot be cancelled: the client's `callServer(actionId, actionArgs)` takes no signal, `fetchServerAction` builds its own fetch without one, and actions are dispatched one at a time, so a pending transcription would also hold up `sendTurn` and the booking confirmation behind it. The browser therefore calls `POST /api/voice/transcribe` on its own origin; the handler checks the `Origin` header, the type and the size (counting bytes while reading, never keeping more than 512 KB), forwards to the API with `request.signal` so a cancel or a closed page reaches the API call, maps the API's codes to a small fixed set, and has no logging at all. The evidence is pinned by `server-action-cancellation.test.ts`, which reads the installed Next.js client: if a future version adds cancellation, it fails and the decision should be revisited.
+  - **Addition: an availability probe.** Before the microphone is requested, the page asks the same route whether voice is switched on (an empty probe that the API answers with `speech_unavailable` before reading any audio), so nobody records for nothing when no provider is configured. It is asked once per page and only after Speak is pressed.
+  - **UI detail.** One control changes from Speak to Stop in place (focus stays on it); Cancel recording, Cancel transcription and Record again are separate buttons. The 15 s limit stops the recording and transcribes it, and says so.
 - **4D Synthesis.** `src/lib/voice/speech-output.ts`, Listen/Stop in `Transcript`, the opt-in switch and the network-voice notice in `ChatPanel`.
 - **4E Tests, documentation, review.** HARNESS (new commands and settings), ARCHITECTURE, README, `evals/README.md`; `change-reviewer` and `/security-review` over the whole branch; secret scan.
 - **4F Live evaluation and end to end** (see checkpoints).
@@ -207,4 +210,4 @@ Groq: console.groq.com/docs/{speech-to-text, rate-limits, your-data, deprecation
 Alternatives: developers.openai.com/api/docs/{pricing, guides/your-data, guides/speech-to-text, guides/text-to-speech}; deepgram.com/pricing; assemblyai.com/pricing; azure.microsoft.com/en-us/pricing/details/speech; elevenlabs.io/pricing; github.com/SYSTRAN/faster-whisper; github.com/ggml-org/whisper.cpp.
 Formats and Python: docs.python.org/3.13/library/wave.html; matroska.org/technical/elements.html; xiph.org/ogg/doc/framing.html; github.com/encode/starlette (`formparsers.py`); fastapi.tiangolo.com/tutorial/request-files.
 Browser: developer.mozilla.org (MediaDevices.getUserMedia, MediaRecorder, isTypeSupported, AudioWorklet, SpeechRecognition, Using the Web Speech API, SpeechSynthesis, SpeechSynthesisVoice.localService, SpeechSynthesisErrorEvent.error, Autoplay guide); w3c.github.io/mediacapture-main and /mediacapture-record; developer.chrome.com (release notes 126, one-time permissions, new in Chrome 139, Chrome 71, autoplay); webkit.org/blog (16574, 11648, 6784); blog.mozilla.org/webrtc (one-time permissions); bugzilla.mozilla.org (1631143); learn.microsoft.com (Edge speech recognition API); MDN browser-compat-data (SpeechRecognition); chromium `media_switches.cc`; webrtc.org (testing); playwright.dev (BrowserContext, BrowserType).
-Local: Next.js 16 docs shipped in `node_modules/next/dist/docs` (Server Actions `bodySizeLimit`, 1 MB default).
+Local: Next.js 16 docs and client shipped in `node_modules/next/dist` (Server Actions: `bodySizeLimit`, sequential dispatch, `callServer`).

@@ -21,6 +21,7 @@ import { newUuid } from "@/lib/uuid";
 
 import { ExecutionTimeline } from "./ExecutionTimeline";
 import { Transcript } from "./Transcript";
+import { VoiceInput, type VoiceControl } from "./VoiceInput";
 
 type Phase =
   | { kind: "idle"; replied: boolean }
@@ -142,6 +143,11 @@ export function ChatPanel() {
   const [pending, setPending] = useState<Pending | null>(null);
   const [phase, setPhase] = useState<Phase>({ kind: "idle", replied: false });
   const [focusTurn, setFocusTurn] = useState<number | null>(null);
+  // Counts transcripts placed in the box, so the box takes focus after each one.
+  const [transcripts, setTranscripts] = useState(0);
+  // The merged transcript did not fit in 500 characters and its end was cut off.
+  const [shortened, setShortened] = useState(false);
+  const voice = useRef<VoiceControl>(null);
 
   const inFlight = useRef(false);
   const noticeRef = useRef<HTMLDivElement>(null);
@@ -174,6 +180,28 @@ export function ChatPanel() {
     }
   }, [phase]);
 
+  // After a transcript is placed in the box the visitor can edit it: focus it, cursor at the end.
+  useEffect(() => {
+    if (transcripts === 0) return;
+    const box = textareaRef.current;
+    if (!box) return;
+    box.focus();
+    box.setSelectionRange(box.value.length, box.value.length);
+  }, [transcripts]);
+
+  /** The transcript joins what is already typed. It is never sent from here: only Send sends. */
+  function addTranscript(text: string) {
+    const merged = [draft.trim(), text.trim()]
+      .filter((part) => part.length > 0)
+      .join(" ");
+    setDraft(merged.slice(0, MAX_MESSAGE_LENGTH));
+    setShortened(merged.length > MAX_MESSAGE_LENGTH); // typed text is kept; the end is cut
+    setPhase((current) =>
+      current.kind === "invalid" ? { kind: "idle", replied: false } : current,
+    );
+    setTranscripts((count) => count + 1);
+  }
+
   async function run(submission: Pending) {
     if (inFlight.current) return;
     inFlight.current = true;
@@ -196,6 +224,7 @@ export function ChatPanel() {
         ]);
         setPending(null);
         setDraft("");
+        setShortened(false);
         setPhase({ kind: "idle", replied: true });
         setFocusTurn(outcome.turn.turn_index);
         break;
@@ -236,6 +265,9 @@ export function ChatPanel() {
       setPhase({ kind: "invalid" });
       return;
     }
+    // Sending ends any recording or transcription that is still going: its text would arrive
+    // after the box was cleared.
+    voice.current?.cancel();
     // The conversation id is made once, on the first submission, and then kept.
     const id = conversationId ?? newUuid();
     if (conversationId === null) setConversationId(id);
@@ -254,6 +286,7 @@ export function ChatPanel() {
   }
 
   function startNewConversation() {
+    voice.current?.cancel();
     if (turns.length > 0 || pending) {
       setEarlier((previous) => [
         ...previous,
@@ -450,6 +483,7 @@ export function ChatPanel() {
               readOnly={sending}
               onChange={(event) => {
                 setDraft(event.target.value);
+                setShortened(false);
                 if (phase.kind === "invalid") {
                   setPhase({ kind: "idle", replied: false });
                 }
@@ -466,6 +500,12 @@ export function ChatPanel() {
             <p id="message-count" className="text-sm">
               {draft.length} of {MAX_MESSAGE_LENGTH} characters
             </p>
+            {shortened ? (
+              <p role="status" className="text-sm font-bold">
+                The transcript was shortened to fit {MAX_MESSAGE_LENGTH}{" "}
+                characters. Check the end of your message before sending.
+              </p>
+            ) : null}
             {phase.kind === "invalid" ? (
               <div
                 role="alert"
@@ -476,6 +516,11 @@ export function ChatPanel() {
                 Write a message of 1 to {MAX_MESSAGE_LENGTH} characters.
               </div>
             ) : null}
+            <VoiceInput
+              controlRef={voice}
+              onTranscript={addTranscript}
+              disabled={sending || phase.kind === "unavailable"}
+            />
             <div className="mt-3 flex flex-wrap items-center gap-4">
               <button
                 type="submit"

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Pending, TurnOutcome } from "@/app/assistant/state";
 import { expectNoA11yViolations } from "@/test/axe";
 import { agentTurn, proposal, reviewTurn } from "@/test/fixtures";
+import { installMedia, type FakeMedia } from "@/test/voice-fakes";
 
 import { ChatPanel } from "./ChatPanel";
 
@@ -728,6 +729,216 @@ describe("ChatPanel: accessibility", () => {
     sendTurn.mockResolvedValueOnce(outcome);
     const { container } = render(<ChatPanel />);
     await send("hello");
+    await expectNoA11yViolations(container);
+  });
+});
+
+describe("ChatPanel: voice input", () => {
+  const fetchMock = vi.fn();
+  let media: FakeMedia;
+
+  const json = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { "content-type": "application/json" },
+    });
+
+  function serve(options: { available?: boolean; text?: string } = {}) {
+    const {
+      available = true,
+      text = "Do you have time for a flat repair on Tuesday?",
+    } = options;
+    fetchMock.mockImplementation((url: string) =>
+      Promise.resolve(
+        String(url).includes("probe=1") ? json({ available }) : json({ text }),
+      ),
+    );
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.stubGlobal("fetch", fetchMock);
+    media = installMedia();
+  });
+
+  afterEach(() => {
+    media.uninstall();
+    vi.unstubAllGlobals();
+    fetchMock.mockReset();
+  });
+
+  async function dictate() {
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Speak" }));
+    });
+    await screen.findByRole("button", { name: "Stop" });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+    });
+  }
+
+  it("puts the transcript in the message box, focuses it, and does not send it", async () => {
+    serve();
+    render(<ChatPanel />);
+
+    await dictate();
+
+    await vi.waitFor(() =>
+      expect(box().value).toBe(
+        "Do you have time for a flat repair on Tuesday?",
+      ),
+    );
+    expect(box()).toHaveFocus();
+    expect(box().selectionStart).toBe(box().value.length); // cursor at the end, ready to edit
+    expect(sendTurn).not.toHaveBeenCalled(); // never auto-sent
+    expect(screen.getByText("46 of 500 characters")).toBeInTheDocument();
+    expect(screen.queryByText(/Sending/)).toBeNull();
+  });
+
+  it("lets the visitor edit the transcript, and only Send sends the edited text", async () => {
+    serve();
+    render(<ChatPanel />);
+    await dictate();
+    await vi.waitFor(() => expect(box().value).not.toBe(""));
+
+    type("Do you have time for a tune-up on Friday?");
+    expect(sendTurn).not.toHaveBeenCalled();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    });
+
+    expect(submissions().map((s) => s.message)).toEqual([
+      "Do you have time for a tune-up on Friday?",
+    ]);
+  });
+
+  it("adds the transcript after what was already typed", async () => {
+    serve({ text: "on Tuesday" });
+    render(<ChatPanel />);
+    type("Do you have time for a flat repair");
+
+    await dictate();
+
+    await vi.waitFor(() =>
+      expect(box().value).toBe("Do you have time for a flat repair on Tuesday"),
+    );
+    expect(sendTurn).not.toHaveBeenCalled();
+  });
+
+  it("never lets the box go over 500 characters", async () => {
+    serve({ text: "y".repeat(400) });
+    render(<ChatPanel />);
+    type("x".repeat(300));
+
+    await dictate();
+
+    await vi.waitFor(() => expect(box().value.length).toBe(500));
+    expect(screen.getByText("500 of 500 characters")).toBeInTheDocument();
+  });
+
+  it("keeps typing and sending available when voice fails", async () => {
+    serve({ available: false });
+    render(<ChatPanel />);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Speak" }));
+    });
+    expect(
+      await screen.findByText("Voice input isn't switched on"),
+    ).toBeInTheDocument();
+    expect(media.getUserMedia).not.toHaveBeenCalled();
+
+    await send("How much is a flat repair?");
+
+    expect(submissions().map((s) => s.message)).toEqual([
+      "How much is a flat repair?",
+    ]);
+    expect(
+      await screen.findByText(/Answer to: How much is a flat repair/),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps the typed message when a recording fails", async () => {
+    serve({ available: false });
+    render(<ChatPanel />);
+    type("I was typing this");
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Speak" }));
+    });
+    await screen.findByRole("alert");
+    expect(box().value).toBe("I was typing this");
+  });
+
+  it("cannot start a recording while a message is being sent", async () => {
+    serve();
+    let release: (o: TurnOutcome) => void = () => undefined;
+    sendTurn.mockImplementation(
+      () => new Promise<TurnOutcome>((resolve) => (release = resolve)),
+    );
+    render(<ChatPanel />);
+    await send("Hello");
+    expect(screen.getByRole("button", { name: "Speak" })).toBeDisabled();
+    await act(async () => {
+      release({ kind: "agent_unavailable" });
+    });
+  });
+
+  it("tells the visitor when the transcript had to be shortened, and the notice goes away on edit", async () => {
+    serve({ text: "y".repeat(400) });
+    render(<ChatPanel />);
+    type("x".repeat(300));
+
+    await dictate();
+
+    expect(
+      await screen.findByText(
+        /The transcript was shortened to fit 500 characters/,
+      ),
+    ).toBeInTheDocument();
+    expect(box().value.startsWith("x".repeat(300))).toBe(true); // what was typed is kept
+    type(box().value.slice(0, 100));
+    expect(screen.queryByText(/was shortened/)).toBeNull();
+  });
+
+  it("does not say it was shortened when everything fit", async () => {
+    serve({ text: "short words" });
+    render(<ChatPanel />);
+    await dictate();
+    await vi.waitFor(() => expect(box().value).toBe("short words"));
+    expect(screen.queryByText(/was shortened/)).toBeNull();
+  });
+
+  it("sending ends a transcription still in flight, so its text cannot arrive after the box is cleared", async () => {
+    let answer: (response: Response) => void = () => undefined;
+    fetchMock.mockImplementation((url: string) =>
+      String(url).includes("probe=1")
+        ? Promise.resolve(json({ available: true }))
+        : new Promise<Response>((resolve) => {
+            answer = resolve; // ignores the abort: a late answer must still be dropped
+          }),
+    );
+    render(<ChatPanel />);
+    await dictate();
+    await screen.findByRole("button", { name: "Cancel transcription" });
+
+    type("Typed meanwhile");
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    });
+    await act(async () => {
+      answer(json({ text: "late transcript" }));
+    });
+
+    expect(submissions().map((s) => s.message)).toEqual(["Typed meanwhile"]);
+    expect(box().value).toBe(""); // the late transcript did not come back into the box
+    expect(screen.queryByText(/Cancel transcription/)).toBeNull();
+  });
+
+  it("has no axe violations with voice input present", async () => {
+    serve();
+    const { container } = render(<ChatPanel />);
     await expectNoA11yViolations(container);
   });
 });
