@@ -7,7 +7,7 @@ import { agentTurn, reviewTurn } from "@/test/fixtures";
 import { fakeVoice, installSpeech } from "@/test/speech-fakes";
 import { installMedia, type FakeMedia } from "@/test/voice-fakes";
 
-import { WELCOME_TEXT } from "./AssistantWelcome";
+import { QUICK_ACTIONS, WELCOME_TEXT } from "./AssistantWelcome";
 import { ChatPanel } from "./ChatPanel";
 
 const { sendTurn, confirmBooking, uuid } = vi.hoisted(() => ({
@@ -141,14 +141,62 @@ describe("a draft from a link", () => {
     expect(box()).toHaveValue("Something else");
   });
 
-  it("offers a draft that arrives later only while the box is empty", () => {
+  it("exists only at initialization: a later context never fills or replaces the box", () => {
     const { rerender } = render(<ChatPanel />);
-    rerender(<ChatPanel initialDraft="First" />);
-    expect(box()).toHaveValue("First");
+    rerender(<ChatPanel initialDraft="Later" />);
+    expect(box()).toHaveValue("");
     type("Typed by the visitor");
-    rerender(<ChatPanel initialDraft="Second" />);
+    rerender(<ChatPanel initialDraft="Another" />);
     expect(box()).toHaveValue("Typed by the visitor");
     expect(sendTurn).not.toHaveBeenCalled();
+  });
+
+  it("never replaces a draft that was typed before: quick starts wait", () => {
+    render(<ChatPanel initialDraft="Do you have time for Flat repair?" />);
+    for (const action of QUICK_ACTIONS) {
+      expect(screen.getByRole("button", { name: action.label })).toBeDisabled();
+    }
+    expect(
+      screen.getByText(/Quick starts fill an empty message box/),
+    ).toBeInTheDocument();
+    expect(box()).toHaveValue("Do you have time for Flat repair?");
+  });
+});
+
+describe("quick starts and text the visitor wrote", () => {
+  it("are disabled, with a visible note, while the box has text, and the text is kept", () => {
+    render(<ChatPanel />);
+    type("My own question");
+    for (const action of QUICK_ACTIONS) {
+      const button = screen.getByRole("button", { name: action.label });
+      expect(button).toBeDisabled();
+      fireEvent.click(button);
+    }
+    expect(box()).toHaveValue("My own question");
+    expect(
+      screen.getByText(/Quick starts fill an empty message box/),
+    ).toBeInTheDocument();
+    expect(sendTurn).not.toHaveBeenCalled();
+  });
+
+  it("work again once the box is cleared, and then fill it without sending", () => {
+    render(<ChatPanel />);
+    type("My own question");
+    type("");
+    const button = screen.getByRole("button", { name: QUICK_ACTIONS[0].label });
+    expect(button).toBeEnabled();
+    fireEvent.click(button);
+    expect(box()).toHaveValue(QUICK_ACTIONS[0].draft);
+    expect(box()).toHaveFocus();
+    expect(sendTurn).not.toHaveBeenCalled();
+  });
+
+  it("treat a box with only spaces as empty", () => {
+    render(<ChatPanel />);
+    type("   ");
+    expect(
+      screen.getByRole("button", { name: QUICK_ACTIONS[1].label }),
+    ).toBeEnabled();
   });
 });
 

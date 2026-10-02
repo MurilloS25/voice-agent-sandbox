@@ -139,13 +139,7 @@ export function ChatPanel({ initialDraft = "" }: { initialDraft?: string }) {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [earlier, setEarlier] = useState<Conversation[]>([]);
   const [draft, setDraft] = useState(initialDraft);
-  // A link that arrives while the page is open (for example "Review again") offers its draft
-  // too, but never over something the visitor already typed.
-  const [seenDraft, setSeenDraft] = useState(initialDraft);
-  if (initialDraft !== seenDraft) {
-    setSeenDraft(initialDraft);
-    if (draft === "") setDraft(initialDraft);
-  }
+
   const [pending, setPending] = useState<Pending | null>(null);
   const [phase, setPhase] = useState<Phase>({ kind: "idle", replied: false });
   const [focusTurn, setFocusTurn] = useState<number | null>(null);
@@ -195,16 +189,6 @@ export function ChatPanel({ initialDraft = "" }: { initialDraft?: string }) {
     }
     // A refusal (for example an autoplay block) is silent: Listen stays available.
   }
-
-  // A draft that arrives while the page is open takes the cursor, so it is not missed.
-  const firstDraft = useRef(true);
-  useEffect(() => {
-    if (firstDraft.current) {
-      firstDraft.current = false;
-      return;
-    }
-    if (initialDraft) textareaRef.current?.focus();
-  }, [initialDraft]);
 
   // The real height of the message box, so focus and anchors never land under it when it sticks.
   useEffect(() => {
@@ -259,8 +243,12 @@ export function ChatPanel({ initialDraft = "" }: { initialDraft?: string }) {
     box.setSelectionRange(box.value.length, box.value.length);
   }, [transcripts]);
 
-  /** A quick start fills the box and puts the cursor in it. Nothing is sent. */
+  /**
+   * A quick start fills the box, and only when it is empty: text the visitor wrote is never
+   * replaced or extended. Nothing is sent. (The buttons are disabled while the box has text.)
+   */
   function pickDraft(text: string) {
+    if (draft.trim() !== "") return;
     setDraft(text);
     setShortened(false);
     setPhase((current) =>
@@ -497,6 +485,7 @@ export function ChatPanel({ initialDraft = "" }: { initialDraft?: string }) {
             onPick={pickDraft}
             showActions={turns.length === 0 && !showSending && !unsent}
             disabled={sending || phase.kind === "unavailable"}
+            boxHasText={draft.trim() !== ""}
           />
 
           {turns.length > 0 || showSending || unsent ? (

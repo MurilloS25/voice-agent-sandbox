@@ -239,7 +239,7 @@ Honest limitations (documented in ADR 0007):
 - Outcome mapping in `sendTurn`/ChatPanel:
   - `ok` → append turn.
   - `unavailable` (timeout/network/5xx) or `turn_in_progress` → "Try again" resends the identical pending submission.
-  - `agent_unavailable` → notice + "Book with the form instead" (`/#availability`).
+  - `agent_unavailable` → notice with "Try again" and "Back to workshop" (plan 0005 removed the manual-form link).
   - `conversation_not_found`, `conversation_expired`, `turn_out_of_order`, `idempotency_key_reused`, `conversation_limit_reached` → "Start a new conversation" (new id). For 404 with earlier turns on screen the notice says the assistant was restarted and the earlier conversation can't continue; the transcript stays visible, read-only.
   - The retry copy says only that retrying "won't repeat an answer the assistant already gave" while the server keeps the conversation. It makes no exactly-once claim: a pending first turn retried after an API restart may be answered again. Booking still always needs the visitor's own **Confirm booking**.
   - No browser persistence (localStorage/sessionStorage) is added for conversations; state lives in component memory only.

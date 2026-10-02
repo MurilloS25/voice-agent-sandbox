@@ -12,7 +12,9 @@ class AgentWriteForbidden(RuntimeError):
 
 class AgentUnavailable(DomainError):
     def __init__(self) -> None:
-        super().__init__("The assistant is not available. You can still book with the form.")
+        super().__init__(
+            "The workshop assistant is temporarily unavailable. Please try again shortly."
+        )
 
 
 class ConversationNotFound(DomainError):

@@ -22,10 +22,13 @@ export function AssistantWelcome({
   onPick,
   showActions,
   disabled,
+  boxHasText,
 }: {
   onPick: (draft: string) => void;
   showActions: boolean;
   disabled: boolean;
+  /** Quick starts only fill an empty message box, so they wait while it holds text. */
+  boxHasText: boolean;
 }) {
   return (
     <section aria-label="Welcome from the assistant" className="space-y-4">
@@ -44,13 +47,20 @@ export function AssistantWelcome({
       {showActions ? (
         <div className="sm:ml-12">
           <p className="mb-2 text-sm font-bold">Quick starts</p>
+          {boxHasText ? (
+            <p id="quick-start-note" className="mb-2 text-sm">
+              Quick starts fill an empty message box. Clear your message to use
+              one.
+            </p>
+          ) : null}
           <ul className="flex flex-wrap gap-3">
             {QUICK_ACTIONS.map((action) => (
               <li key={action.label}>
                 <button
                   type="button"
                   onClick={() => onPick(action.draft)}
-                  disabled={disabled}
+                  disabled={disabled || boxHasText}
+                  aria-describedby={boxHasText ? "quick-start-note" : undefined}
                   className="min-h-12 border-2 border-bottle bg-hivis px-4 py-2 text-left font-bold [overflow-wrap:anywhere] hover:bg-celeste disabled:opacity-60"
                 >
                   {action.label}
