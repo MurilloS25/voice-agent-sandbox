@@ -70,6 +70,6 @@ body {
  */
 @media (min-width: 48rem) and (min-height: 44rem) {
   html {
-    scroll-padding-bottom: 16rem;
+    scroll-padding-bottom: calc(var(--composer-height, 16rem) + 1rem);
   }
 }

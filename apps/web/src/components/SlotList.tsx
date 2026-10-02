@@ -71,7 +71,7 @@ export function SlotList({
         {slots.map((slot) => (
           <li
             key={slot.start}
-            className="border-2 border-bottle bg-white px-2 py-2 text-center font-display text-2xl leading-none font-extrabold sm:px-3 sm:text-3xl"
+            className="border-2 border-bottle bg-white px-2 py-2 text-center font-display text-2xl leading-none font-extrabold [overflow-wrap:anywhere] sm:px-3 sm:text-3xl"
           >
             <time dateTime={slot.start}>
               {formatSlotTime(slot.start, timezone)}

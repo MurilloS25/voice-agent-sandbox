@@ -281,3 +281,40 @@ describe("a transcript waits for the visitor", () => {
     expect(submissions().map((s) => s.message)).toEqual(["first take"]);
   });
 });
+
+describe("Record again that does not produce a transcript", () => {
+  it("keeps the transcript the visitor was checking", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const media = installMedia();
+    fetchMock.mockImplementation((url: string) => {
+      const probe = String(url).includes("probe=1");
+      const body = probe ? { available: true } : { text: "first take" };
+      return Promise.resolve(
+        new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    });
+    render(<ChatPanel />);
+    await press("Speak");
+    await screen.findByRole("button", { name: "Stop" });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+    await press("Stop");
+    await vi.waitFor(() => expect(box().value).toBe("first take"));
+
+    // The microphone is refused the second time.
+    media.getUserMedia.mockRejectedValueOnce(
+      new DOMException("no", "NotAllowedError"),
+    );
+    await press("Record again");
+    await screen.findByRole("alert");
+    expect(box().value).toBe("first take");
+    media.uninstall();
+    vi.unstubAllGlobals();
+  });
+});

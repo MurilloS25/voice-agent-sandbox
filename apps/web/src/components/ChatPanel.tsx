@@ -154,6 +154,7 @@ export function ChatPanel({ initialDraft = "" }: { initialDraft?: string }) {
   // The merged transcript did not fit in 500 characters and its end was cut off.
   const [shortened, setShortened] = useState(false);
   const voice = useRef<VoiceControl>(null);
+  const composerRef = useRef<HTMLFormElement>(null);
   // A transcript is in the box and has not been sent yet; and which text it was.
   const [reviewing, setReviewing] = useState(false);
   const lastTranscript = useRef("");
@@ -194,6 +195,34 @@ export function ChatPanel({ initialDraft = "" }: { initialDraft?: string }) {
     }
     // A refusal (for example an autoplay block) is silent: Listen stays available.
   }
+
+  // A draft that arrives while the page is open takes the cursor, so it is not missed.
+  const firstDraft = useRef(true);
+  useEffect(() => {
+    if (firstDraft.current) {
+      firstDraft.current = false;
+      return;
+    }
+    if (initialDraft) textareaRef.current?.focus();
+  }, [initialDraft]);
+
+  // The real height of the message box, so focus and anchors never land under it when it sticks.
+  useEffect(() => {
+    const form = composerRef.current;
+    if (!form || typeof ResizeObserver === "undefined") return;
+    const root = document.documentElement;
+    const observer = new ResizeObserver(() => {
+      root.style.setProperty(
+        "--composer-height",
+        `${form.getBoundingClientRect().height}px`,
+      );
+    });
+    observer.observe(form);
+    return () => {
+      observer.disconnect();
+      root.style.removeProperty("--composer-height");
+    };
+  });
 
   // The timeline is a side column from lg up and a collapsible section below it.
   useEffect(() => {
@@ -243,18 +272,19 @@ export function ChatPanel({ initialDraft = "" }: { initialDraft?: string }) {
   /** Recording again replaces the transcript from last time, if it was left as it was. */
   function onRecordingStart() {
     speech.stop();
-    const previous = lastTranscript.current;
-    lastTranscript.current = "";
-    const current = draft.trim();
-    if (previous && current.endsWith(previous)) {
-      setDraft(current.slice(0, current.length - previous.length).trim());
-    }
   }
 
   /** The transcript joins what is already typed. It is never sent from here: only Send sends. */
   function addTranscript(text: string) {
+    // Recording again replaces the last transcript if it was left as it was. It is removed only
+    // now that a new one has arrived, so a failed or cancelled recording loses nothing.
+    const previous = lastTranscript.current;
+    let base = draft.trim();
+    if (previous && base.endsWith(previous)) {
+      base = base.slice(0, base.length - previous.length).trim();
+    }
     lastTranscript.current = text.trim();
-    const merged = [draft.trim(), text.trim()]
+    const merged = [base, text.trim()]
       .filter((part) => part.length > 0)
       .join(" ");
     setDraft(merged.slice(0, MAX_MESSAGE_LENGTH));
@@ -562,6 +592,7 @@ export function ChatPanel({ initialDraft = "" }: { initialDraft?: string }) {
 
         {showComposer ? (
           <form
+            ref={composerRef}
             onSubmit={(event) => {
               event.preventDefault();
               submit();

@@ -1,6 +1,6 @@
 # Plan 0005 — Assistant-first navigation and visual polish
 
-Status: in progress. Branch `feature/voice-ui-polish`, created from `b1ae052` (Milestone 4 squash on `main`). No provider, database or API change.
+Status: completed. Branch `feature/voice-ui-polish`, created from `b1ae052` (Milestone 4 squash on `main`). No provider, database or API change.
 
 # Outcome
 
@@ -55,4 +55,8 @@ API suite, web suite and build, OpenAPI/client drift check, secret scan, diff re
 
 ## Decisions or follow-ups
 
-No ADR expected (no architecture change). Follow-ups are listed in the pull request.
+No ADR (no architecture change).
+
+Result: all offline checks passed; the browser pass (scripted model, loopback only, throwaway Edge profile) was clean at 1440, 390, 320 px, 720 px at 2x zoom and 200% root text: no horizontal scroll, axe clean, visible focus rings, no console errors. Review changes: `/book` is a route handler (a page redirect streamed as 200 behind `loading.tsx`); the sticky composer applies only from 48rem wide and 44rem tall, with scroll padding taken from its measured height; Record again removes the previous transcript only when the new one arrives.
+
+Follow-ups: `agent_unavailable` in the API still says "You can still book with the form" (never shown by the web app; changing it means an API and OpenAPI change); quick starts replace text already typed before the first turn; check the `/book` redirect origin behind a proxy at deploy.

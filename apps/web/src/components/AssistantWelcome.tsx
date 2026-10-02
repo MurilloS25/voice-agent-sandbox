@@ -42,7 +42,7 @@ export function AssistantWelcome({
         </div>
       </div>
       {showActions ? (
-        <div className="ml-12">
+        <div className="sm:ml-12">
           <p className="mb-2 text-sm font-bold">Quick starts</p>
           <ul className="flex flex-wrap gap-3">
             {QUICK_ACTIONS.map((action) => (
