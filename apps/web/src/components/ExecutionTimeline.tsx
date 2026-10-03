@@ -14,7 +14,14 @@ const TOOL_LABELS: Record<string, string> = {
   list_services: "Service list",
   find_available_slots: "Open times",
   prepare_booking_review: "Booking review",
+  discard_booking_review: "Withdraw booking review",
 };
+
+const DISCARD_REASONS = {
+  declined: "you declined it.",
+  changed_search: "you asked about another service or day.",
+  replaced: "a new review replaced it.",
+} as const;
 
 const GUARDRAIL_LABELS: Record<string, string> = {
   tool_not_allowed: "A tool that is not allowed was refused",
@@ -114,6 +121,16 @@ function EventBody({ event }: { event: TimelineEvent }) {
             {event.service_name}, {event.local_date}, {event.local_start} to{" "}
             {event.local_end} ({event.timezone}), {event.price_display}. Nothing
             is booked until you confirm.
+          </p>
+        </Row>
+      );
+    case "booking_review_discarded":
+      return (
+        <Row label="A booking review is no longer active">
+          <p className="[overflow-wrap:anywhere]">
+            {event.service_name}, {event.local_date}, {event.local_start}:{" "}
+            {DISCARD_REASONS[event.reason]} Nothing was booked and nothing was
+            cancelled.
           </p>
         </Row>
       );

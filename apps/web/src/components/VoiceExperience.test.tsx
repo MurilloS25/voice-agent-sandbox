@@ -796,6 +796,48 @@ describe("End voice session", () => {
   });
 });
 
+describe("a rejected booking review on the voice screen", () => {
+  it("removes Confirm booking from the stage when a later turn withdrew the review", async () => {
+    sendTurn
+      .mockImplementationOnce(async (p: Pending) => ({
+        kind: "ok",
+        turn: reviewTurn(p.turnIndex),
+      }))
+      .mockImplementationOnce(async (p: Pending) => ({
+        kind: "ok",
+        turn: agentTurn(p.turnIndex, {
+          conversation_id: p.conversationId,
+          reply: { source: "assistant", text: "Okay, dropped." },
+          events: [
+            {
+              seq: 1,
+              at: "2026-09-30T12:00:00Z",
+              kind: "booking_review_discarded",
+              actor: "tool",
+              reason: "declined",
+              service_name: "Flat repair",
+              local_date: "2026-10-01",
+              local_start: "09:00",
+            },
+          ],
+        }),
+      }));
+    setup();
+    await startSession();
+    await speakToTheAssistant("first take");
+    await screen.findByRole("button", { name: "Confirm booking" });
+    browserStartsSpeaking();
+    browserFinishesSpeaking();
+
+    await speakToTheAssistant("second take");
+    await screen.findByText(/Okay, dropped/);
+
+    expect(
+      screen.queryByRole("button", { name: "Confirm booking" }),
+    ).not.toBeInTheDocument();
+  });
+});
+
 describe("Voice and Text share one conversation", () => {
   it("keeps messages, the review and the draft when the visitor switches", async () => {
     sendTurn

@@ -32,6 +32,8 @@ type TranscriptProps = {
   readOnly?: boolean;
   /** The turn whose review may be confirmed here, if any. */
   liveReviewTurn?: number | null;
+  /** Turns whose review was withdrawn or replaced: shown as history, never actionable. */
+  discardedReviewTurns?: ReadonlySet<number>;
   /** The turn whose response takes focus. Set only after the visitor sent a message. */
   focusTurn?: number | null;
   /** Keeps element ids unique when several transcripts are on the page. */
@@ -148,19 +150,30 @@ export function ReviewBlock({
   live,
   turnIndex,
   onReviewAgain,
+  discarded = false,
   className = "max-w-2xl sm:ml-12",
 }: {
   review: Review;
   live: boolean;
   turnIndex: number;
+  /** The review was withdrawn or replaced: no longer active, nothing was booked. */
+  discarded?: boolean;
   onReviewAgain?: (context: ReviewAgain) => void;
   className?: string;
 }) {
   const again = assistantAgainHref(review);
   return (
     <section
-      aria-label={`Booking review for reply ${turnIndex}`}
-      className={`rounded-2xl border border-bottle/20 bg-white p-4 shadow-[0_8px_30px_-14px_rgb(15_59_54/0.45)] ${className}`}
+      aria-label={
+        discarded
+          ? `Booking review for reply ${turnIndex} (no longer active)`
+          : `Booking review for reply ${turnIndex}`
+      }
+      className={`rounded-2xl border bg-white p-4 ${
+        discarded
+          ? "border-ink/50 border-dashed"
+          : "border-bottle/20 shadow-[0_8px_30px_-14px_rgb(15_59_54/0.45)]"
+      } ${className}`}
       onClick={(event) => {
         // Every plain click on a link back to the assistant is a new request from the visitor,
         // even when the address does not change. The link still navigates as usual.
@@ -185,8 +198,9 @@ export function ReviewBlock({
       }}
     >
       <p className="font-bold">
-        Review prepared by the schedule service — nothing is booked until you
-        confirm.
+        {discarded
+          ? "No longer active — this review was discarded or replaced."
+          : "Review prepared by the schedule service — nothing is booked until you confirm."}
       </p>
       <div className="mt-3">
         <BookingReview proposal={review} />
@@ -197,6 +211,14 @@ export function ReviewBlock({
           reviewHref={again}
           availabilityHref={again}
         />
+      ) : discarded ? (
+        <p className="mt-4">
+          It can no longer be confirmed, and nothing was booked.{" "}
+          <Link href={again} className="font-bold underline underline-offset-4">
+            Review this time again
+          </Link>
+          .
+        </p>
       ) : (
         <p className="mt-4">
           This review is not active here.{" "}
@@ -221,6 +243,7 @@ export function Transcript({
   thinking = false,
   readOnly = false,
   liveReviewTurn = null,
+  discardedReviewTurns,
   focusTurn = null,
   idPrefix,
   playback,
@@ -284,6 +307,9 @@ export function Transcript({
                   turnIndex={response.turn_index}
                   onReviewAgain={onReviewAgain}
                   live={!readOnly && liveReviewTurn === response.turn_index}
+                  discarded={
+                    discardedReviewTurns?.has(response.turn_index) ?? false
+                  }
                 />
               ) : null}
             </div>

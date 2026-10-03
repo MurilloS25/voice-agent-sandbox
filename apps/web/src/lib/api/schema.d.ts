@@ -277,6 +277,7 @@ export interface components {
         | components["schemas"]["ToolRequestedEvent"]
         | components["schemas"]["ToolResultEvent"]
         | components["schemas"]["BookingReviewReadyEvent"]
+        | components["schemas"]["BookingReviewDiscardedEvent"]
         | components["schemas"]["AssistantMessageEvent"]
         | components["schemas"]["SystemMessageEvent"]
         | components["schemas"]["GuardrailEvent"]
@@ -433,6 +434,44 @@ export interface components {
       slots: components["schemas"]["SlotResponse"][];
       /** Timezone */
       timezone: string;
+    };
+    /**
+     * BookingReviewDiscardedEvent
+     * @description The review waiting for the visitor was withdrawn or replaced. Nothing was booked, and
+     *     nothing is cancelled: a review is only a proposal.
+     */
+    BookingReviewDiscardedEvent: {
+      /**
+       * Actor
+       * @constant
+       */
+      actor: "tool";
+      /**
+       * At
+       * Format: date-time
+       */
+      at: string;
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "booking_review_discarded";
+      /** Local Date */
+      local_date: string;
+      /** Local Start */
+      local_start: string;
+      /**
+       * Reason
+       * @enum {string}
+       */
+      reason: "declined" | "changed_search" | "replaced";
+      /**
+       * Seq
+       * @description Position within this turn, from 1.
+       */
+      seq: number;
+      /** Service Name */
+      service_name: string;
     };
     /** BookingReviewReadyEvent */
     BookingReviewReadyEvent: {
@@ -1119,7 +1158,7 @@ export interface operations {
           "application/json": components["schemas"]["AppointmentResponse"];
         };
       };
-      /** @description slot_unavailable (just taken) or proposal_stale (details changed). */
+      /** @description slot_unavailable (just taken), proposal_stale (details changed) or proposal_discarded (the visitor withdrew this review: nothing is booked). */
       409: {
         headers: {
           [name: string]: unknown;

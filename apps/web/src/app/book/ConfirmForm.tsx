@@ -71,6 +71,21 @@ function Outcome({
           </p>
         </>
       );
+    case "discarded":
+      return (
+        <>
+          <p className="text-lg font-bold text-rust">
+            This review is no longer active
+          </p>
+          <p className="mt-1">
+            It was discarded or replaced. Nothing was booked.{" "}
+            <Link href={reviewHref} className={linkClass}>
+              Review again
+            </Link>
+            .
+          </p>
+        </>
+      );
     case "invalid":
       return (
         <>

@@ -186,8 +186,9 @@ describe("the Review again link", () => {
       "href",
       "/assistant?service=flat-repair&date=2026-10-01",
     );
+    // The first review was replaced by the second: it is history, marked as no longer active.
     const card = screen.getByRole("region", {
-      name: "Booking review for reply 1",
+      name: "Booking review for reply 1 (no longer active)",
     });
     expect(within(card).getByRole("link")).toBe(again());
   });

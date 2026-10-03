@@ -38,6 +38,8 @@ export async function confirmBooking(
       return { kind: "conflict" };
     case "proposal_stale":
       return { kind: "stale" };
+    case "proposal_discarded":
+      return { kind: "discarded" };
     case "proposal_expired":
       return { kind: "expired" };
     case "proposal_invalid":

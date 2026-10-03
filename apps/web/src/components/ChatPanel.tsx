@@ -19,6 +19,7 @@ import {
 } from "@/lib/agent-message";
 import { draftFor } from "@/lib/assistant-link";
 import { useApiReadiness } from "@/lib/readiness";
+import { reviewStatus } from "@/lib/review-state";
 import { newUuid } from "@/lib/uuid";
 import {
   PREVIEW_SPEECH_ID,
@@ -642,10 +643,10 @@ export function ChatPanel({
     phase.kind === "invalid" ||
     phase.kind === "rejected" ||
     phase.kind === "unavailable";
-  const liveReviewTurn = ended
-    ? null
-    : ([...turns].reverse().find((t) => t.response.booking_review)?.response
-        .turn_index ?? null);
+  // Which review can still be confirmed: only the latest one, and only while no later turn
+  // withdrew it (a review is a pending proposal; the server refuses a withdrawn one too).
+  const reviews = reviewStatus(turns);
+  const liveReviewTurn = ended ? null : reviews.live;
   const liveReview =
     liveReviewTurn === null
       ? null
@@ -825,6 +826,7 @@ export function ChatPanel({
           thinking={showSending !== null}
           readOnly={ended}
           liveReviewTurn={liveReviewTurn}
+          discardedReviewTurns={reviews.discarded}
           liveReviewElsewhere={variant === "panel"}
           focusTurn={variant === "text" ? focusTurn : null}
           idPrefix={variant === "text" ? "current" : "panel"}
