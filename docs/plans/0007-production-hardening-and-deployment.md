@@ -318,4 +318,3 @@ A manual check by the owner (not automated, and nothing was recorded: no audio, 
 - After a wrong date was given and another search was made, the earlier booking review became "no longer active" and lost its Confirm booking button; the new review was the only actionable one.
 
 Not part of this acceptance: the Vercel production deployment from `main` and the switch of Vercel's protection from All Deployments to Standard Protection, which come after the merge and are validated separately.
-
