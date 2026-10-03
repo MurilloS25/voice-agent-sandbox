@@ -1,6 +1,8 @@
 """Static checks of the deployment files: nothing secret, nothing unpinned, nothing unsafe."""
 
+import hashlib
 import re
+import ssl
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -62,3 +64,28 @@ def test_the_example_files_list_names_only() -> None:
             if match and match.group(1) in [*SECRET_NAMES, "CLIENT_ID_KEY"]:
                 assert match.group(2) == "", line
     assert "NEXT_PUBLIC" not in WEB_EXAMPLE.replace("none of these starts with NEXT_PUBLIC_", "")
+
+
+def test_the_ca_certificate_is_one_public_certificate_at_the_agreed_path() -> None:
+    pem = (ROOT / "apps" / "api" / "certs" / "supabase-ca.crt").read_text("ascii")
+    assert pem.count("-----BEGIN CERTIFICATE-----") == 1
+    assert pem.count("-----END CERTIFICATE-----") == 1
+    assert "PRIVATE KEY" not in pem and pem.count("-----BEGIN") == 1
+    der = ssl.PEM_cert_to_DER_cert(pem)
+    assert (
+        hashlib.sha256(der).hexdigest().upper()
+        == "807025AD50D4ED219D2C9C7D299C004F824EB00CF7F65AFEF607D07B72E6CAFA"
+    )
+
+
+def test_the_certificate_path_agrees_in_dockerfile_blueprint_and_example() -> None:
+    assert "COPY --chown=app:app apps/api/certs /app/certs" in DOCKERFILE
+    assert "value: /app/certs/supabase-ca.crt" in RENDER
+    assert "DB_SSLROOTCERT=/app/certs/supabase-ca.crt" in PRODUCTION_EXAMPLE
+    assert "value: verify-full" in RENDER and "DB_SSLMODE=verify-full" in PRODUCTION_EXAMPLE
+
+
+def test_the_blueprint_is_one_free_instance_in_virginia() -> None:
+    assert "plan: free" in RENDER and "region: virginia" in RENDER
+    assert "numInstances: 1" in RENDER and "type: web" in RENDER
+    assert RENDER.count("- type:") == 1
