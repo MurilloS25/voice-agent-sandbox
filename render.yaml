@@ -6,7 +6,7 @@ services:
     name: voice-agent-api
     runtime: docker
     plan: free # approved topology; an always-on plan would be an optional future change of this one line
-    region: oregon # keep next to the Supabase region (decision D3)
+    region: virginia # US East, next to the Supabase project in us-east-1 (decision D3)
     dockerfilePath: ./apps/api/Dockerfile
     dockerContext: .
     healthCheckPath: /health/ready
