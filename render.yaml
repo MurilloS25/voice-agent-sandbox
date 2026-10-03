@@ -5,7 +5,7 @@ services:
   - type: web
     name: voice-agent-api
     runtime: docker
-    plan: free # decision D2; switch to `starter` (always on, 0.5 CPU / 512 MB) without other changes
+    plan: free # approved topology; an always-on plan would be an optional future change of this one line
     region: oregon # keep next to the Supabase region (decision D3)
     dockerfilePath: ./apps/api/Dockerfile
     dockerContext: .

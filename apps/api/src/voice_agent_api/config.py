@@ -116,7 +116,7 @@ class Settings(BaseSettings):
     # transcriptions from 6 a minute (20 RPM and 7,200 audio seconds an hour allow far more; the
     # budget below is the real brake); the rest are generous for a human.
     rate_limit_enabled: bool = True
-    rate_agent_client_per_min: int = Field(6, ge=1, le=600)
+    rate_agent_client_per_min: int = Field(3, ge=1, le=600)
     rate_agent_overall_per_min: int = Field(3, ge=1, le=600)
     rate_speech_client_per_min: int = Field(6, ge=1, le=600)
     rate_speech_overall_per_min: int = Field(6, ge=1, le=600)
@@ -260,6 +260,13 @@ def failed_security_settings(settings: Settings) -> list[str]:
         for name, (field, ceiling) in _PRODUCTION_CEILINGS.items():
             if getattr(settings, field) > ceiling:
                 failed.append(name)
+        # A per-visitor limit above its overall limit would restrict nothing.
+        for client_name, (client_field, _) in _PRODUCTION_CEILINGS.items():
+            if not client_name.endswith("_CLIENT_PER_MIN") or client_name in failed:
+                continue
+            overall_field = _PRODUCTION_CEILINGS[client_name.replace("_CLIENT_", "_OVERALL_")][0]
+            if getattr(settings, client_field) > getattr(settings, overall_field):
+                failed.append(client_name)
         if not settings.budget_enforced:
             failed.append("BUDGET_ENFORCED")
         providers = settings.agent_provider != "disabled" or settings.speech_provider != "disabled"

@@ -1,6 +1,6 @@
 # Plan 0007 — Production hardening and deployment
 
-Status: **proposed (phase 5A, research and plan only)**. Branch `feature/production-hardening-deployment`, created from `3dad109` (PR #5 squash on `main`). Nothing in this plan has been implemented or deployed, and no external service, account, key or database was touched while writing it: it rests on the repository and on official documentation read on **2026-10-02**. Gate G0 (below) waits for the owner's approval of the architecture and of the monthly cost.
+Status: **approved topology (G0 approved 2026-10-02); gates G1 to G3 implemented locally, G4 onward pending**. Originally written as phase 5A, research and plan only. Branch `feature/production-hardening-deployment`, created from `3dad109` (PR #5 squash on `main`). Nothing in this plan has been implemented or deployed, and no external service, account, key or database was touched while writing it: it rests on the repository and on official documentation read on **2026-10-02**. The approved publication is entirely on free tiers (see the decision below).
 
 # Outcome
 
@@ -57,7 +57,7 @@ Common to all three: Vercel Hobby hosts the Next.js app (a portfolio is not comm
 | Code changes | Hardening (G1), Docker and Blueprint (G2), wake gate (G1). | Same as 1 (the wake gate then rarely shows). | Everything in 1 plus a new persistence layer, a Vercel entrypoint, a transaction-mode check, new ADRs. |
 | Rollback | Render dashboard rollback (disables auto-deploy until re-enabled) and Vercel promote of the previous deployment; no schema change. | Same. | Same for code; a migration adds irreversible-in-practice schema. |
 
-**Recommendation: option 2, reached through option 1.** Build and verify everything on Render Free (no cost, same code), then move the same service to an always-on plan in the Render dashboard before the portfolio link is shared. The code is identical; only the plan differs, and the wake gate designed below is useful in both (restarts, deploys, a stopped service). Option 3 is not recommended now: it is the best shape for a stateless platform, but it needs a persistent conversation store and persistent counters that the portfolio does not otherwise need, and it would reopen the privacy question of storing visitor text. It stays a documented later phase. Neither the price nor the free tiers decided this: the deciding factors are that option 2 keeps the tested single-process design, removes the cold start a recruiter would otherwise meet, bounds cost to one fixed amount, and keeps rollback to a dashboard click.
+**Decision (approved at G0): option 1, Vercel Hobby + Render Free + Supabase Free + Groq Free, for the initial publication of the portfolio.** No paid Render plan is required before sharing the link and no monthly cost is a requirement. Render Free may spin down after 15 minutes without traffic and take about a minute to wake; the approved mitigation is the "Starting workshop assistant…" experience, whose health polling is triggered only by a real visit, is bounded, and never uses an artificial keep-alive. If Render lets the service be created without a payment method, that is the recommended route, so no charge can happen by accident. If a free limit is reached we prefer a controlled suspension or unavailability to a charge. An always-on Render plan (option 2) stays only an optional future improvement: the same artifact and code switch to it in the dashboard, but nothing here assumes it. Option 3 is not recommended now: it is the best shape for a stateless platform, but it needs a persistent conversation store and persistent counters that the portfolio does not otherwise need, and it would reopen the privacy question of storing visitor text. It stays a documented later phase. Neither the price nor the free tiers decided this: the deciding factors are that option 1 keeps the tested single-process design, cannot produce a charge, and keeps rollback to a dashboard click.
 
 # Audit of the current code
 
@@ -129,15 +129,15 @@ Every value is an environment setting with a conservative default and a test tha
 19. **Recovery from a lost conversation.** Keep the "can't continue" notice and the read-only earlier messages; add a single explicit action that starts a new conversation and puts the visitor's last message back in the box (never resent automatically). Document the in-memory limit in the user-facing copy.
 20. **Rollback.** Render: dashboard rollback to the previous successful deploy (note: it disables auto-deploy until re-enabled); Vercel: promote the previous deployment; no schema change is planned, so there is nothing to migrate back; secrets rotation list kept in the operations notes; a runbook step "disable the assistant" that sets `AGENT_PROVIDER=disabled` and `SPEECH_PROVIDER=disabled` (the app already degrades to a notice).
 
-# Cold-start experience (if Render Free is used)
+# Cold-start experience (Render Free, the approved plan)
 
-Applies to both plans, because restarts and deploys also make the API unavailable.
+The same experience would also serve a future always-on plan, because restarts and deploys make the API unavailable too.
 
 - The web tier exposes `GET /api/assistant/ready`, which calls the API's `/health` (no Groq, no database) with a short timeout and returns `ready`, `starting` or `unreachable`. It is rate-limited and never calls the agent.
 - On first interaction the assistant shows **"Starting workshop assistant…"** in the voice stage and in Text, with `aria-busy` and a polite status, an elapsed-time hint after a few seconds ("this can take about a minute"), and a **Retry** button. The Start and Send controls are disabled with a visible reason; the microphone is not requested; no turn, transcription or agent call is made before readiness.
 - Polling uses exponential backoff (about 2 s growing to about 8 s with jitter) and a hard cap near two minutes (the documented spin-up is about one minute), cancels on unmount and on `pagehide`, and stops on success. After the cap the state is "The assistant isn't responding", with Retry and a link back to the workshop page.
 - Switching to Text does not fake readiness: Text shows the same state and keeps the visitor's draft. If the API stops answering mid-session, the existing retry notice appears and a wake poll starts.
-- There is **no keep-alive, scheduled ping or any attempt to defeat spin-down**: the plan's behaviour is accepted and made visible. Moving to an always-on plan is the remedy, not a pinger.
+- There is **no keep-alive, scheduled ping or any attempt to defeat spin-down**: the plan's behaviour is accepted and made visible. Polling starts only when a visitor opens the assistant, is bounded and stops on success; a pinger is not the remedy. An always-on plan would be an optional future improvement, not a requirement.
 - Tests: scripted API that wakes after N polls; cancellation; timeout; accessibility (axe, live region, focus); no agent call before `ready`.
 
 # Database
@@ -194,7 +194,7 @@ Roughly: G1 is two to three focused pull requests (1A API, 1B web and UX, then G
 
 | Risk | Likelihood and impact | Mitigation |
 | --- | --- | --- |
-| Free-tier cold start hurts a first impression. | High on Free, low on always-on. | Explicit wake gate; move to always-on before sharing. |
+| Free-tier cold start hurts a first impression. | High on Free. | Explicit wake gate (approved mitigation); share the link knowing a first visit may wait about a minute. An always-on plan is an optional future improvement. |
 | Supabase Free pauses an idle project (rule unconfirmed). | Medium; the app is down until restored. | Confirm the rule at G0; readiness reports it; restore runbook; accept or upgrade (D3). |
 | Groq Free limits (8K TPM) throttle a burst of visitors. | High for simultaneous visitors. | Global agent rate from measured tokens; friendly 429 UX; per-model project limits; consider a paid tier with a spend limit (D4). |
 | In-memory budgets reset on restart. | Low. | Half-of-limit defaults; Groq-side ceilings; optional persistence (D5). |
@@ -206,8 +206,8 @@ Roughly: G1 is two to three focused pull requests (1A API, 1B web and UX, then G
 
 # Decisions needed from the owner (for G0)
 
-1. **D1 Topology:** option 2 reached through option 1 (recommended), option 1 only, or option 3 later.
-2. **D2 Render:** plan (read the price at https://render.com/pricing), region (ideally the same continent as the Supabase project), start on Free then upgrade, or paid from the start.
+1. **D1 Topology:** *approved: option 1, free tiers only.* (Considered: option 2 always-on, option 3 later.)
+2. **D2 Render:** *approved: Free plan, no payment required; the same artifact can later switch to an always-on plan, which is not assumed.* Region near the Supabase project.
 3. **D3 Supabase:** the project's region, whether a possible inactivity pause is acceptable, who restores it, or whether to pay for a plan without pausing. No artificial keep-alive.
 4. **D4 Groq:** stay on the Free plan (hard ceiling, no billing possible, no spend limit) or move to a paid tier with an organization spend limit; confirm Zero Data Retention.
 5. **D5 Counters:** in-memory with Groq-side backstop (recommended) or persisted in Postgres (needs a migration and an ADR).
@@ -221,12 +221,12 @@ Roughly: G1 is two to three focused pull requests (1A API, 1B web and UX, then G
 Do not do any of this before G0 is approved and the corresponding gate is reached. **Never paste a secret into the chat**: enter each one only in the dashboard field or in a hidden prompt.
 
 - **Vercel:** sign in with the personal account; import the GitHub repository; set Root Directory to `apps/web`; keep the framework preset; add the variables by name in the Production and Preview scopes as Sensitive (`API_BASE_URL`, `API_SHARED_SECRET`, the client-id pepper, optionally `NEXT_SERVER_ACTIONS_ENCRYPTION_KEY`); deploy a Preview first; turn on the one WAF rate-limit rule if the plan allows the path match; attach the domain last.
-- **Render:** create the web service from the Blueprint (or by hand with the same settings), choose the plan and region decided at G0, leave auto-deploy off until G6, set health check path `/health`, shutdown delay 30 s, one instance; enter every secret with `sync: false`; keep the dashboard rollback path in mind.
+- **Render:** create the web service from the Blueprint (or by hand with the same settings), use the Free plan (create it without a payment method if Render allows it; if a card is demanded, stop and ask) in the region decided at G0, leave auto-deploy off until G6, set health check path `/health`, shutdown delay 30 s, one instance; enter every secret with `sync: false`; keep the dashboard rollback path in mind.
 - **Supabase:** confirm the project's region and plan; confirm the pause rule; create a **new** password for `voice_agent_api` (never reuse the development one); use the session pooler host on 5432; download the CA certificate from the SSL configuration section; do not change migrations, RLS or grants; leave SSL enforcement as is unless you decide otherwise (it reboots the database).
-- **Groq:** create a dedicated production project and key; set per-model custom limits below the organization's; confirm Zero Data Retention in Data Controls; if you move to a paid tier, set the monthly spend limit and alerts at 50%, 75% and 90%; store the key only in the Render dashboard.
+- **Groq:** create a dedicated production project and key; set per-model custom limits below the organization's; confirm Zero Data Retention in Data Controls; stay on the Free tier (no billing; a paid tier is not part of this plan); store the key only in the Render dashboard.
 - **DNS or domain (only if D6 chooses one):** add the records Vercel shows; wait for the certificate; do not point the domain at Render.
 - **Variables and secrets:** generate each secret with the project's generator or a password manager, one per environment, never reused from development; keep a private list of what to rotate and when.
-- **Spend limits and alerts:** Groq alerts if a paid tier is used; check Render and Vercel usage pages after the first week.
+- **Usage:** nothing here can bill; check Render and Vercel usage pages after the first week.
 - **Final review:** open the public URL from a phone and a computer, run the agreed G9 script yourself with your real microphone, check the Render, Vercel and Groq dashboards afterwards, and approve the merge only then.
 
 # Decisions to record and follow-ups
@@ -243,7 +243,7 @@ Done on `feature/production-hardening-deployment`, verified locally only. No acc
 
 | Setting | Value | Why |
 | --- | --- | --- |
-| Agent turns, overall / per visitor per minute | 3 / 6 | `floor(0.7 x 8,000 TPM / ~2,000 tokens per turn)` is 2 to 3; a visitor may burst but not exceed the global rate |
+| Agent turns, overall / per visitor per minute | 3 / 3 | `floor(0.7 x 8,000 TPM / ~2,000 tokens per turn)` is 2 to 3. The visitor limit equals the global one, so it is a real restriction; production rejects any per-visitor value above its global value. The bucket holds half a minute's worth: a burst of up to 2 quick turns, then one every 20 s, always subject to the global bucket |
 | Speech, overall / per visitor per minute | 6 / 6 | Whisper Free allows 20 RPM; 6 leaves a wide margin and matches a person's pace |
 | Confirmations, overall / per visitor | 12 / 6 | Writes are rare; still bounded |
 | Reads, overall / per visitor | 300 / 60 | Page loads and polling are cheap and need headroom |

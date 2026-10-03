@@ -15,6 +15,7 @@ from voice_agent_api.config import (
     validate_settings,
 )
 from voice_agent_api.security import auth
+from voice_agent_api.security.ratelimit import Policy
 
 URLS = [
     ("GET", "/v1/business"),
@@ -247,3 +248,27 @@ def test_a_provider_in_production_needs_postgres_for_the_budget() -> None:
 def test_the_api_secret_comes_from_the_environment_only_by_name() -> None:
     assert Settings.model_fields["api_shared_secret"].annotation == SecretStr | None
     assert TEST_API_SECRET not in repr(make())
+
+
+def test_production_requires_each_visitor_limit_not_to_exceed_its_overall_limit() -> None:
+    # The shipped defaults are valid: agent 3/3, speech 6/6, write 6/12, read 60/300.
+    assert failed_settings(make()) == []
+    settings = make()
+    assert (settings.rate_agent_client_per_min, settings.rate_agent_overall_per_min) == (3, 3)
+    assert failed_settings(make(rate_agent_client_per_min=4)) == ["RATE_AGENT_CLIENT_PER_MIN"]
+    assert failed_settings(make(rate_speech_client_per_min=7, rate_speech_overall_per_min=6)) == [
+        "RATE_SPEECH_CLIENT_PER_MIN"
+    ]
+    assert failed_settings(make(rate_write_client_per_min=13)) == ["RATE_WRITE_CLIENT_PER_MIN"]
+    assert failed_settings(make(rate_read_client_per_min=301)) == ["RATE_READ_CLIENT_PER_MIN"]
+    # Lowering both together stays valid, and so does equality.
+    assert failed_settings(make(rate_agent_client_per_min=2, rate_agent_overall_per_min=2)) == []
+
+
+def test_development_may_set_a_visitor_limit_above_the_overall_one() -> None:
+    assert failed_settings(make(app_env="development", rate_agent_client_per_min=10)) == []
+
+
+def test_the_agent_bucket_allows_two_quick_turns_then_one_every_twenty_seconds() -> None:
+    policy = Policy.per_minute(3)
+    assert (policy.per_min, policy.burst) == (3, 2)
