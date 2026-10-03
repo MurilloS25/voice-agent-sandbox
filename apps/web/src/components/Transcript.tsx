@@ -156,7 +156,7 @@ export function ReviewBlock({
   review: Review;
   live: boolean;
   turnIndex: number;
-  /** The review was withdrawn or replaced: no longer active, nothing was booked. */
+  /** The review was withdrawn or replaced: it can no longer be confirmed. */
   discarded?: boolean;
   onReviewAgain?: (context: ReviewAgain) => void;
   className?: string;
@@ -213,7 +213,8 @@ export function ReviewBlock({
         />
       ) : discarded ? (
         <p className="mt-4">
-          It can no longer be confirmed, and nothing was booked.{" "}
+          It can no longer be confirmed. Withdrawing it books and cancels
+          nothing.{" "}
           <Link href={again} className="font-bold underline underline-offset-4">
             Review this time again
           </Link>

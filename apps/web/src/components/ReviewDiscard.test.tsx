@@ -174,7 +174,9 @@ describe("ChatPanel: a rejected booking review stops being actionable", () => {
     expect(
       within(card).getByText(/No longer active — this review was discarded/),
     ).toBeInTheDocument();
-    expect(within(card).getByText(/nothing was booked/i)).toBeInTheDocument();
+    expect(
+      within(card).getByText(/books and cancels nothing/i),
+    ).toBeInTheDocument();
     expect(within(card).queryByRole("button")).toBeNull();
     expect(card.textContent).not.toMatch(/cancel(l)?ed/i); // it never claims a cancellation
   });
@@ -286,7 +288,7 @@ describe("ChatPanel: a rejected booking review stops being actionable", () => {
       within(panel).getByText(/another service or day/),
     ).toBeInTheDocument();
     expect(
-      within(panel).getByText(/nothing was cancelled/i),
+      within(panel).getByText(/books and cancels nothing/i),
     ).toBeInTheDocument();
     expect(panel.textContent).not.toContain(TOKEN);
     expect(container.textContent).not.toContain(TOKEN);

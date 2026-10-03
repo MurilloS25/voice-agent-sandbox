@@ -103,12 +103,18 @@ def _normalize_tool_calls(message: AIMessage, cap: int) -> tuple[AIMessage, bool
     return normalized, truncated
 
 
+_REPLACED_CONTENT = (
+    '{"status":"ok","discarded":false,"note":"A new review was just prepared: it replaced the '
+    'old one and is the one shown below. Nothing more to withdraw."}'
+)
+
+
 def _discard_content(discarded: bool) -> str:
     if discarded:
         return (
-            '{"status":"ok","discarded":true,"note":"The review was withdrawn. Nothing was '
-            "booked and nothing was cancelled: a review is only a proposal. If the visitor gave "
-            'a new date, time or service, search for it now."}'
+            '{"status":"ok","discarded":true,"note":"The review was withdrawn and can no longer '
+            "be confirmed. Withdrawing books and cancels nothing: a review is only a proposal. "
+            'If the visitor gave a new date, time or service, search for it now."}'
         )
     return '{"status":"ok","discarded":false,"note":"No booking review was waiting."}'
 
@@ -227,6 +233,14 @@ def build_graph(deps: GraphDeps) -> CompiledStateGraph[Any, Any, Any, Any]:
             started = time.monotonic()
             now = deps.clock()
             if name == "discard_booking_review":
+                if workspace.review is not None:
+                    # A review was prepared earlier in this turn: it replaced the old one and is
+                    # the one on screen, so there is nothing more to withdraw.
+                    events.tool_result(
+                        name, "ok", 0, "A new review replaced the waiting one.", None
+                    )
+                    results.append(ToolMessage(content=_REPLACED_CONTENT, tool_call_id=call_id))
+                    continue
                 discarded = discard_prior("declined", now)
                 events.tool_result(
                     name,

@@ -129,8 +129,8 @@ function EventBody({ event }: { event: TimelineEvent }) {
         <Row label="A booking review is no longer active">
           <p className="[overflow-wrap:anywhere]">
             {event.service_name}, {event.local_date}, {event.local_start}:{" "}
-            {DISCARD_REASONS[event.reason]} Nothing was booked and nothing was
-            cancelled.
+            {DISCARD_REASONS[event.reason]} It can no longer be confirmed.
+            Withdrawing it books and cancels nothing.
           </p>
         </Row>
       );

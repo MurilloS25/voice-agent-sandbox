@@ -526,9 +526,13 @@ describe("prepareTextForSpeech: dashes, dates and time ranges", () => {
     ["00:30-12:30", "from 12:30 AM to 12:30 PM"],
     ["18:00-00:00", "from 6 PM to midnight"],
     ["22:00-02:00", "from 10 PM to 2 AM"], // across midnight
-    ["9:15-17:45", "from 9:15 AM to 5:45 PM"],
+    ["09:15-17:45", "from 9:15 AM to 5:45 PM"],
     ["11:59-12:01", "from 11:59 AM to 12:01 PM"],
     ["23:00-23:59", "from 11 PM to 11:59 PM"],
+    ["from 09:00-13:00", "from 9 AM to 1 PM"], // not "from from"
+    ["From 09:00-13:00", "from 9 AM to 1 PM"],
+    ["between 09:00-13:00", "between 9 AM and 1 PM"],
+    ["Open from 09:00‑13:00.", "Open from 9 AM to 1 PM."],
   ])("converts the range %s to %s", (range, spoken) => {
     expect(prepareTextForSpeech(range)).toBe(spoken);
   });
@@ -554,6 +558,11 @@ describe("prepareTextForSpeech: dashes, dates and time ranges", () => {
     "ID 2026-10-08-12", // an identifier that merely contains a date
     "10:00-11:00-12:00", // a chain is not one range
     "a09:00-13:00", // inside a word
+    "9:15-17:45", // not HH:MM (single-digit hour)
+    "9:00-10:00 PM", // a 12-hour range: the AM or PM is already there
+    "09:00-10:00 pm",
+    "09:00 - 10:00 P.M.",
+    "1:30-2:30", // a duration or a score, not a clock range
   ])("leaves %s exactly as written", (text) => {
     expect(prepareTextForSpeech(text)).toBe(text);
   });

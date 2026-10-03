@@ -437,8 +437,8 @@ export interface components {
     };
     /**
      * BookingReviewDiscardedEvent
-     * @description The review waiting for the visitor was withdrawn or replaced. Nothing was booked, and
-     *     nothing is cancelled: a review is only a proposal.
+     * @description The review waiting for the visitor was withdrawn or replaced, so it can no longer be
+     *     confirmed. Withdrawing books and cancels nothing: a review is only a proposal.
      */
     BookingReviewDiscardedEvent: {
       /**

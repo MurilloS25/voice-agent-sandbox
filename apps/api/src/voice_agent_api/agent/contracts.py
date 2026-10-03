@@ -93,8 +93,8 @@ class BookingReviewReadyEvent(_Event):
 
 
 class BookingReviewDiscardedEvent(_Event):
-    """The review waiting for the visitor was withdrawn or replaced. Nothing was booked, and
-    nothing is cancelled: a review is only a proposal."""
+    """The review waiting for the visitor was withdrawn or replaced, so it can no longer be
+    confirmed. Withdrawing books and cancels nothing: a review is only a proposal."""
 
     kind: Literal["booking_review_discarded"]
     actor: Literal["tool"]

@@ -88,7 +88,7 @@ const US_DATE = new RegExp(
 // token as well: not inside a word, not part of a longer clock (`09:00:00`), a chain of ranges,
 // an ISO timestamp (`T09:00-05:00`) or an offset.
 const TIME_RANGE = new RegExp(
-  `(?<![\\w:./${DASH}])(\\d{1,2}):(\\d{2})[ \t]*[${DASH}][ \t]*(\\d{1,2}):(\\d{2})(?![\\w:/]|[.]\\d|[${DASH}]\\d)`,
+  `(?<![\\w:./${DASH}])((?:[Ff]rom|[Bb]etween)[ \t]+)?(\\d{2}):(\\d{2})[ \t]*[${DASH}][ \t]*(\\d{2}):(\\d{2})(?![\\w:/]|[.]\\d|[${DASH}]\\d|[ \t]*[AaPp]\\.?[Mm])`,
   "g",
 );
 
@@ -132,12 +132,22 @@ export function prepareTextForSpeech(text: string): string {
     )
     .replace(
       TIME_RANGE,
-      (match, h1: string, m1: string, h2: string, m2: string) => {
+      (
+        match,
+        lead: string | undefined,
+        h1: string,
+        m1: string,
+        h2: string,
+        m2: string,
+      ) => {
         const from = spokenTime(Number(h1), Number(m1));
         const to = spokenTime(Number(h2), Number(m2));
-        return from !== undefined && to !== undefined
-          ? `from ${from} to ${to}`
-          : match;
+        if (from === undefined || to === undefined) return match;
+        // "between 09:00-13:00" is "between 9 AM and 1 PM"; otherwise "from ... to ...", and a
+        // leading "from" is absorbed so it is not said twice.
+        return lead?.toLowerCase().startsWith("between")
+          ? `between ${from} and ${to}`
+          : `from ${from} to ${to}`;
       },
     );
 }

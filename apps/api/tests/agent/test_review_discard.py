@@ -187,6 +187,22 @@ def test_a_new_review_replaces_the_previous_one_unambiguously() -> None:
     assert world.stored_bookings() == 1
 
 
+def test_discarding_after_preparing_a_new_review_in_the_same_turn_keeps_the_new_one() -> None:
+    world, first = with_review(
+        call_tools(FIND_SAME_AGAIN),
+        say("More times."),
+        call_tools(PREPARE_2, DISCARD),
+        say("The new review is below."),
+    )
+    world.send("Anything later?")
+    second = world.send("Take the second one.")
+    assert discarded(second) == ["replaced"]
+    assert second.booking_review is not None  # the new review stays on screen
+    assert pending(world) is not None
+    assert not can_still_confirm(world, first)
+    assert can_still_confirm(world, second)
+
+
 # -- compatible questions leave the review alone -----------------------------------------------
 
 
@@ -241,6 +257,21 @@ def test_the_prompt_stops_describing_a_review_that_was_withdrawn() -> None:
     world.send("Thanks.")
     system = " ".join(str(m.content) for m in world.model.calls[-1] if m.type == "system")
     assert "is waiting for the visitor to press Confirm booking" not in system
+
+
+def test_the_withdrawal_is_remembered_before_the_turn_is_committed() -> None:
+    world, review_turn = with_review(call_tools(DISCARD), say("Dropped."))
+    seen: list[int] = []
+    real_commit = world.store.commit_turn
+
+    def commit(*args: Any, **kwargs: Any) -> bool:
+        seen.append(len(world.service.discards))  # what the registry holds at commit time
+        return bool(real_commit(*args, **kwargs))
+
+    world.store.commit_turn = commit  # type: ignore[method-assign]
+    world.send("Never mind.")
+    assert seen == [1]
+    assert not can_still_confirm(world, review_turn)
 
 
 def test_the_registry_forgets_after_the_proposal_could_have_expired() -> None:

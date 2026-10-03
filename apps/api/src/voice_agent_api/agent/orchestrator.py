@@ -127,11 +127,14 @@ class AgentService:
             response, update, stats = self._run_turn(request, decision)
             if self._budget is not None and reservation is not None:
                 self._settle(reservation, stats, completed=response.outcome == "completed")
+            if update.discarded_proposal is not None:
+                # Remembered before the commit, so there is no instant in which the withdrawn
+                # token can still be confirmed. If the commit then fails the visitor's retry
+                # decides the same way, and a 409 on a review the model withdrew is the safe side.
+                self.discards.add(update.discarded_proposal)
             committed = self._store.commit_turn(
                 decision.conversation_id, decision.turn_token, response, update
             )
-            if committed and update.discarded_proposal is not None:
-                self.discards.add(update.discarded_proposal)
             if not committed:
                 raise AgentCommitFailed
             # Counts only: no message text and no identifiers.
