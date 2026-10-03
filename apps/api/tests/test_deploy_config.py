@@ -49,7 +49,7 @@ def test_the_context_excludes_environment_files_tests_and_the_web_app() -> None:
 
 
 def test_render_blueprint_carries_no_secret_values_and_uses_the_free_plan() -> None:
-    assert "plan: free" in RENDER and "maxShutdownDelaySeconds: 30" in RENDER
+    assert "plan: free" in RENDER
     assert "healthCheckPath: /health/live" in RENDER
     for name in SECRET_NAMES:
         block = re.search(rf"- key: {name}\n(\s+)(\S+)", RENDER)
@@ -87,5 +87,27 @@ def test_the_certificate_path_agrees_in_dockerfile_blueprint_and_example() -> No
 
 def test_the_blueprint_is_one_free_instance_in_virginia() -> None:
     assert "plan: free" in RENDER and "region: virginia" in RENDER
-    assert "numInstances: 1" in RENDER and "type: web" in RENDER
+    assert "numInstances" not in RENDER and "type: web" in RENDER  # Free is one instance, always
     assert RENDER.count("- type:") == 1
+
+
+def test_the_blueprint_declares_nothing_the_free_plan_rejects() -> None:
+    # Render rejects these on the Free plan (the first one was rejected for real): disks, scaling,
+    # configurable shutdown delay, explicit instance counts, pre-deploy commands and cron/worker types.
+    for field in (
+        "maxShutdownDelaySeconds",
+        "disk:",
+        "scaling:",
+        "autoscaling",
+        "preDeployCommand",
+        "type: worker",
+        "type: cron",
+        "type: pserv",
+    ):
+        assert field not in RENDER, field
+    assert "runtime: docker" in RENDER
+    assert "region: virginia" in RENDER
+    assert "healthCheckPath: /health/live" in RENDER
+    assert "autoDeploy: false" in RENDER
+    # Every secret is entered in the dashboard; nothing carries a value.
+    assert len(re.findall(r"^\s+sync: false$", RENDER, re.MULTILINE)) == 8

@@ -5,13 +5,13 @@ services:
   - type: web
     name: voice-agent-api
     runtime: docker
+    # One instance by definition: the Free plan cannot scale, and the in-memory conversations and
+    # limits require exactly one. No scaling or shutdown-delay field is declared (Free rejects them).
     plan: free # approved topology; an always-on plan would be an optional future change of this one line
     region: virginia # US East, next to the Supabase project in us-east-1 (decision D3)
     dockerfilePath: ./apps/api/Dockerfile
     dockerContext: .
-    numInstances: 1 # the in-memory conversations and limits require exactly one instance
     healthCheckPath: /health/live # a database blip must not restart the only instance (it holds the conversations)
-    maxShutdownDelaySeconds: 30
     autoDeploy: false # deploys are deliberate
     envVars:
       - key: APP_ENV
