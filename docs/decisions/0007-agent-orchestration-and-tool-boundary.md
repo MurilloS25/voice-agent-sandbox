@@ -1,5 +1,7 @@
 # The text agent reads and proposes; it never writes, and one process owns its conversations
 
+> **Update (acceptance of plan 0007, 2026-10-03):** the allow-list has a **fifth tool, `discard_booking_review`**, which takes no arguments, writes nothing and cancels nothing. A review is a pending, signed proposal, not a booking: it is now withdrawn when the visitor declines it (the tool), when a later search names another service or day, or when a new review replaces it (the last two are decided in code, whatever the model writes). A withdrawal emits a `booking_review_discarded` timeline event (display values only), clears the conversation's pending review and records the proposal id in a bounded, per-process registry (`agent/discards.py`, kept slightly longer than a proposal lives) that `POST /v1/appointments` consults only when it would create a new appointment: it answers 409 `proposal_discarded`, so replaying a confirmation that already booked is unchanged. The registry is lost on a restart, like the conversations (a withdrawn review could then be confirmed for at most its 10-minute life). The earlier alternative "discarding a review when a turn degrades" below still stands: a degraded turn withdraws nothing by itself.
+
 - Status: accepted
 - Date: 2026-10-01
 
