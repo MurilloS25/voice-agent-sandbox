@@ -102,7 +102,7 @@ Verifying against the real database (done once for Milestone 2; repeat after DB-
 
 Server-side SSL enforcement is not enabled (it reboots the database); clients already use `sslmode=verify-full`.
 
-Rotation or suspected leak: `secrets generate --rotate`, run `\password voice_agent_api` again with the new `DB_PASSWORD`, and restart the API. The old password stops working immediately. A rotated signing key invalidates reviews that are open (they last 10 minutes).
+Rotation or suspected leak: `secrets generate --rotate`, run `\password voice_agent_api` again with the new `DB_PASSWORD`, and restart the API. The old password stops working immediately. The role has one password, shared by local development and the Render service: once Render exists, update both together (set the new value in the Render dashboard, then run `\password`, then restart or redeploy). A rotated signing key invalidates reviews that are open (they last 10 minutes).
 
 After `db push`, these queries should return nothing for the first and `false, false, false, true, false, false` for the second (the same checks run in `tests/integration`):
 
