@@ -64,6 +64,7 @@ describe("confirmBooking", () => {
   });
 
   it.each([
+    [429, "rate_limited", "unavailable"],
     [409, "slot_unavailable", "conflict"],
     [409, "proposal_stale", "stale"],
     [422, "proposal_expired", "expired"],

@@ -123,6 +123,29 @@ def test_a_provider_failure_keeps_the_reservation_because_the_provider_may_have_
     assert used(ledger, BudgetCategory.AGENT_TOKENS) == 400
 
 
+def test_a_turn_that_fails_after_a_reported_call_is_never_settled_below_its_reservation() -> None:
+    ledger = InMemoryBudgetLedger()
+    first_call_calls_a_tool = AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "name": "find_available_slots",
+                "args": {"service_id": "flat-repair", "date": "2026-10-06"},
+                "id": "c1",
+                "type": "tool_call",
+            }
+        ],
+        usage_metadata={"input_tokens": 100, "output_tokens": 20, "total_tokens": 120},
+    )
+    world = AgentWorld(
+        [first_call_calls_a_tool, RuntimeError("second call failed")], budget=guard(ledger)
+    )
+    assert world.send("times?").outcome == "degraded"
+    assert len(world.model.calls) == 2
+    # Only 120 tokens were reported, but the second call may have been counted by the provider.
+    assert used(ledger, BudgetCategory.AGENT_TOKENS) == 400
+
+
 def test_a_turn_without_reported_usage_keeps_its_reservation() -> None:
     ledger = InMemoryBudgetLedger()
     world = AgentWorld([say("no usage metadata")], budget=guard(ledger))

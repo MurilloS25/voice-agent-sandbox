@@ -168,10 +168,26 @@ def test_readiness_follows_the_check_and_says_only_a_status_word() -> None:
     api = Protected(ready_check=lambda: state["up"])
     assert api.client.get("/health/ready").json() == {"status": "ready"}
     state["up"] = False
+    api.app.state.ready_cache = None  # the answer is cached for a few seconds (tested below)
     response = api.client.get("/health/ready")
     assert response.status_code == 503
     assert response.json() == {"status": "unavailable"}
     assert response.headers["cache-control"] == "no-store"
+
+
+def test_a_flood_of_readiness_probes_runs_one_database_check_per_window() -> None:
+    calls = {"n": 0}
+
+    def check() -> bool:
+        calls["n"] += 1
+        return True
+
+    api = Protected(ready_check=check)
+    for _ in range(50):
+        assert api.client.get("/health/ready").status_code == 200
+    assert calls["n"] == 1
+    api.app.state.draining = True  # draining is never cached
+    assert api.client.get("/health/ready").json() == {"status": "draining"}
 
 
 def test_readiness_never_touches_the_provider_or_the_agent() -> None:

@@ -121,7 +121,7 @@ class AgentService:
             started = self._monotonic()
             response, update, stats = self._run_turn(request, decision)
             if self._budget is not None and reservation is not None:
-                self._settle(reservation, stats)
+                self._settle(reservation, stats, completed=response.outcome == "completed")
             committed = self._store.commit_turn(
                 decision.conversation_id, decision.turn_token, response, update
             )
@@ -144,14 +144,16 @@ class AgentService:
                 self._store.abort_turn(decision.conversation_id, decision.turn_token)
             self._gate.release()
 
-    def _settle(self, reservation: Reservation, stats: "_Stats") -> None:
+    def _settle(self, reservation: Reservation, stats: "_Stats", *, completed: bool) -> None:
         if self._budget is None:
             return
         if stats.provider_untouched:
             self._budget.refund(reservation)  # the model was never contacted
             return
         used = stats.input_tokens + stats.output_tokens
-        if used > 0:
+        # A turn that did not complete may have called the model again after the usage we saw
+        # (a timeout or an error): then the reservation is never lowered, only raised.
+        if used > 0 and (completed or used > reservation.amount):
             self._budget.settle(reservation, used)
         # No usage reported: the provider may have counted the call, so the reservation stays.
 

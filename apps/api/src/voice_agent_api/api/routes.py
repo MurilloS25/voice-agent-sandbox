@@ -7,6 +7,8 @@ it would block the event loop for every other request. A test enforces this.
 
 import logging
 import re
+import time
+from collections.abc import Callable
 from datetime import date
 from typing import Annotated, Any
 from uuid import UUID
@@ -139,6 +141,21 @@ def health() -> HealthResponse:
     return HealthResponse(status="ok")
 
 
+# The readiness probe is public, so its database query is answered from a short cache: a flood of
+# anonymous probes cannot tie up the small connection pool that real turns and bookings need.
+_READY_CACHE_S = 5.0
+
+
+def _database_answers(state: Any, check: Callable[[], bool]) -> bool:
+    now = time.monotonic()
+    cached = getattr(state, "ready_cache", None)
+    if cached is not None and now - cached[0] < _READY_CACHE_S:
+        return bool(cached[1])
+    answer = bool(check())
+    state.ready_cache = (now, answer)
+    return answer
+
+
 @router.get(
     "/health/ready",
     response_model=ReadinessResponse,
@@ -152,7 +169,7 @@ def health_ready(request: Request) -> Response:
     if getattr(state, "draining", False):
         return JSONResponse({"status": "draining"}, status_code=503, headers=_NO_STORE)
     check = getattr(state, "ready_check", None)
-    if check is not None and not check():
+    if check is not None and not _database_answers(state, check):
         return JSONResponse({"status": "unavailable"}, status_code=503, headers=_NO_STORE)
     return JSONResponse({"status": "ready"}, headers=_NO_STORE)
 

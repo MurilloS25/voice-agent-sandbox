@@ -50,7 +50,7 @@ def test_the_context_excludes_environment_files_tests_and_the_web_app() -> None:
 
 def test_render_blueprint_carries_no_secret_values_and_uses_the_free_plan() -> None:
     assert "plan: free" in RENDER and "maxShutdownDelaySeconds: 30" in RENDER
-    assert "healthCheckPath: /health/ready" in RENDER
+    assert "healthCheckPath: /health/live" in RENDER
     for name in SECRET_NAMES:
         block = re.search(rf"- key: {name}\n(\s+)(\S+)", RENDER)
         assert block is not None, name
