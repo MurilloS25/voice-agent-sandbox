@@ -92,8 +92,9 @@ def test_the_blueprint_is_one_free_instance_in_virginia() -> None:
 
 
 def test_the_blueprint_declares_nothing_the_free_plan_rejects() -> None:
-    # Render rejects these on the Free plan (the first one was rejected for real): disks, scaling,
-    # configurable shutdown delay, explicit instance counts, pre-deploy commands and cron/worker types.
+    # Render rejects or does not support these on the Free plan (the first was rejected for
+    # real): configurable shutdown delay, disks, scaling, instance counts, pre-deploy commands
+    # and the worker, cron and private-service types.
     for field in (
         "maxShutdownDelaySeconds",
         "disk:",
