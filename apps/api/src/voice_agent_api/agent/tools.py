@@ -70,7 +70,7 @@ class _Args(BaseModel):
 
 
 class NoArgs(_Args):
-    """No arguments."""
+    pass
 
 
 class FindAvailableSlotsArgs(_Args):
@@ -94,6 +94,20 @@ class PrepareBookingReviewArgs(_Args):
     )
 
 
+def _without_titles(schema: Any, *, in_properties: bool = False) -> Any:
+    """The JSON schema without pydantic's generated `title` keys, which tell the model nothing and
+    cost tokens on every call. A property that is itself called `title` is kept."""
+    if isinstance(schema, dict):
+        return {
+            key: _without_titles(value, in_properties=(key == "properties" and not in_properties))
+            for key, value in schema.items()
+            if in_properties or key != "title"
+        }
+    if isinstance(schema, list):
+        return [_without_titles(item) for item in schema]
+    return schema
+
+
 @dataclass(frozen=True)
 class ToolSpec:
     name: str
@@ -106,7 +120,7 @@ class ToolSpec:
             "function": {
                 "name": self.name,
                 "description": self.description,
-                "parameters": self.args_model.model_json_schema(),
+                "parameters": _without_titles(self.args_model.model_json_schema()),
             },
         }
 
@@ -140,6 +154,12 @@ TOOLS: dict[str, ToolSpec] = {
             "because availability was requested, and never choose a time for the visitor. Books "
             "nothing: the visitor confirms with a button.",
             PrepareBookingReviewArgs,
+        ),
+        ToolSpec(
+            "discard_booking_review",
+            "Withdraw the waiting booking review when the visitor declines it. Books and cancels "
+            "nothing.",
+            NoArgs,
         ),
     )
 }
@@ -461,6 +481,8 @@ class ToolExecutor:
         _, _, local_end = local_parts(review.end, tz)
         shown_price = price_display(review.service.price)
         pending = PendingReview(
+            proposal_id=review.proposal.id,
+            service_id=review.service.id,
             service_name=review.service.name,
             local_date=local_date,
             local_start=local_start,

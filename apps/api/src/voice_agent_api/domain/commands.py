@@ -11,7 +11,12 @@ from uuid import UUID
 
 from voice_agent_api.domain.aliases import alias_for
 from voice_agent_api.domain.availability import check_slot
-from voice_agent_api.domain.errors import ProposalExpired, ProposalStale, ServiceNotFound
+from voice_agent_api.domain.errors import (
+    ProposalDiscarded,
+    ProposalExpired,
+    ProposalStale,
+    ServiceNotFound,
+)
 from voice_agent_api.domain.fingerprint import catalog_fingerprint, fingerprints_match
 from voice_agent_api.domain.models import (
     Appointment,
@@ -66,13 +71,18 @@ def confirm_appointment(
     proposal: Proposal,
     now: datetime,
     source: str = SOURCE_WEB_DEMO,
+    is_discarded: Callable[[UUID], bool] | None = None,
 ) -> tuple[Appointment, bool]:
     """Create the appointment for a verified proposal, or return the one it already created.
 
     Returns (appointment, created). Runs `decide` inside the adapter's locked transaction.
+    `is_discarded` tells whether the visitor withdrew this proposal; it is asked only when a new
+    appointment would be created, so replaying a confirmation that already booked is unaffected.
     """
 
     def decide(snapshot: CatalogSnapshot, bookings: Sequence[Booking]) -> NewAppointment:
+        if is_discarded is not None and is_discarded(proposal.id):
+            raise ProposalDiscarded
         if now >= proposal.expires_at:
             raise ProposalExpired
         service = snapshot.service

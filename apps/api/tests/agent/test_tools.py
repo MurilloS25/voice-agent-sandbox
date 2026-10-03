@@ -42,12 +42,13 @@ def run(
     return tools.run(name, parse_tool_args(name, raw), offered, NOW)
 
 
-def test_the_allow_list_is_exactly_the_four_tools() -> None:
+def test_the_allow_list_is_exactly_the_five_tools() -> None:
     assert list(TOOLS) == [
         "get_business_info",
         "list_services",
         "find_available_slots",
         "prepare_booking_review",
+        "discard_booking_review",
     ]
     assert [s["function"]["name"] for s in tool_specs()] == list(TOOLS)
 

@@ -8,6 +8,7 @@ minute free tier.
 
 import json
 from datetime import UTC, datetime
+from uuid import UUID
 
 from langchain_core.messages import SystemMessage
 
@@ -176,6 +177,8 @@ def test_the_assistant_still_cannot_book_confirm_or_claim_to() -> None:
 
 def test_a_pending_review_is_still_described_without_any_token() -> None:
     pending = PendingReview(
+        proposal_id=UUID(int=1),
+        service_id="flat-repair",
         service_name="Flat repair",
         local_date="2026-10-06",
         local_start="09:00",
@@ -189,12 +192,13 @@ def test_a_pending_review_is_still_described_without_any_token() -> None:
     assert "v1." not in text
 
 
-def test_the_tools_and_their_arguments_are_unchanged() -> None:
+def test_the_tools_and_their_arguments_are_the_approved_ones() -> None:
     assert list(TOOLS) == [
         "get_business_info",
         "list_services",
         "find_available_slots",
         "prepare_booking_review",
+        "discard_booking_review",
     ]
     properties = {
         spec["function"]["name"]: sorted(spec["function"]["parameters"]["properties"])
@@ -211,6 +215,7 @@ def test_the_tools_and_their_arguments_are_unchanged() -> None:
             "service_id",
         ],
         "prepare_booking_review": ["slot_id"],
+        "discard_booking_review": [],
     }
 
 

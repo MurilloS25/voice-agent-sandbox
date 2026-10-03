@@ -92,6 +92,7 @@
               "discriminator": {
                 "mapping": {
                   "assistant_message": "#/components/schemas/AssistantMessageEvent",
+                  "booking_review_discarded": "#/components/schemas/BookingReviewDiscardedEvent",
                   "booking_review_ready": "#/components/schemas/BookingReviewReadyEvent",
                   "guardrail": "#/components/schemas/GuardrailEvent",
                   "provider_error": "#/components/schemas/ProviderErrorEvent",
@@ -115,6 +116,9 @@
                 },
                 {
                   "$ref": "#/components/schemas/BookingReviewReadyEvent"
+                },
+                {
+                  "$ref": "#/components/schemas/BookingReviewDiscardedEvent"
                 },
                 {
                   "$ref": "#/components/schemas/AssistantMessageEvent"
@@ -401,6 +405,65 @@
           "slots"
         ],
         "title": "AvailabilityResponse",
+        "type": "object"
+      },
+      "BookingReviewDiscardedEvent": {
+        "additionalProperties": false,
+        "description": "The review waiting for the visitor was withdrawn or replaced. Nothing was booked, and\nnothing is cancelled: a review is only a proposal.",
+        "properties": {
+          "actor": {
+            "const": "tool",
+            "title": "Actor",
+            "type": "string"
+          },
+          "at": {
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "kind": {
+            "const": "booking_review_discarded",
+            "title": "Kind",
+            "type": "string"
+          },
+          "local_date": {
+            "title": "Local Date",
+            "type": "string"
+          },
+          "local_start": {
+            "title": "Local Start",
+            "type": "string"
+          },
+          "reason": {
+            "enum": [
+              "declined",
+              "changed_search",
+              "replaced"
+            ],
+            "title": "Reason",
+            "type": "string"
+          },
+          "seq": {
+            "description": "Position within this turn, from 1.",
+            "title": "Seq",
+            "type": "integer"
+          },
+          "service_name": {
+            "title": "Service Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "seq",
+          "at",
+          "kind",
+          "actor",
+          "reason",
+          "service_name",
+          "local_date",
+          "local_start"
+        ],
+        "title": "BookingReviewDiscardedEvent",
         "type": "object"
       },
       "BookingReviewReadyEvent": {
@@ -1536,7 +1599,7 @@
                 }
               }
             },
-            "description": "slot_unavailable (just taken) or proposal_stale (details changed)."
+            "description": "slot_unavailable (just taken), proposal_stale (details changed) or proposal_discarded (the visitor withdrew this review: nothing is booked)."
           },
           "422": {
             "content": {

@@ -132,6 +132,7 @@ def test_the_request_carries_the_expected_parameters_and_tool_schema() -> None:
         "list_services",
         "find_available_slots",
         "prepare_booking_review",
+        "discard_booking_review",
     ]
     schema = body["tools"][2]["function"]["parameters"]
     assert schema["properties"]["service_id"]["pattern"] == "^[a-z0-9-]{1,64}$"

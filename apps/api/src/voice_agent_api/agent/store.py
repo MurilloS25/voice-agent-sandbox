@@ -219,6 +219,8 @@ class InMemoryConversationStore:
                 entry.offered = update.offered
             if update.pending_review is not None:
                 entry.pending_review = update.pending_review
+            elif update.discarded_proposal is not None:
+                entry.pending_review = None
             entry.in_flight = None
             entry.last_active = self._clock()
             return True

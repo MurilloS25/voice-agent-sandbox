@@ -24,6 +24,7 @@ from voice_agent_api.api.dependencies import (
     AppointmentsDep,
     CatalogDep,
     ClockDep,
+    DiscardsDep,
     IdFactoryDep,
     TokenCodecDep,
 )
@@ -90,7 +91,10 @@ _CONFIRM_ERRORS: dict[int | str, dict[str, Any]] = {
     },
     409: {
         "model": ErrorResponse,
-        "description": "slot_unavailable (just taken) or proposal_stale (details changed).",
+        "description": (
+            "slot_unavailable (just taken), proposal_stale (details changed) or "
+            "proposal_discarded (the visitor withdrew this review: nothing is booked)."
+        ),
     },
     422: {
         "model": ErrorResponse,
@@ -272,10 +276,13 @@ def confirm_appointment_route(
     appointments: AppointmentsDep,
     clock: ClockDep,
     codec: TokenCodecDep,
+    discards: DiscardsDep,
 ) -> AppointmentResponse:
     """The only write. Requires a valid proposal token and an explicit `confirm: true`."""
     proposal = codec.decode(body.proposal_token)
-    appointment, created = confirm_appointment(appointments, proposal, clock())
+    appointment, created = confirm_appointment(
+        appointments, proposal, clock(), is_discarded=discards.__contains__
+    )
     if not created:
         response.status_code = 200
     # Audit trail: the sanitized outcome only. Never an identifier (the appointment's included),

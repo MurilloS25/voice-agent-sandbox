@@ -8,6 +8,7 @@ not replayed to the model on later turns: the system prompt is rebuilt each turn
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Annotated, Literal, TypedDict
+from uuid import UUID
 
 from langchain_core.messages import AnyMessage
 from langgraph.graph.message import add_messages
@@ -31,6 +32,10 @@ class OfferedSlot:
 
 @dataclass(frozen=True)
 class PendingReview:
+    # The review's proposal id and service id stay on the server (never in an event, a log or the
+    # prompt): they let a later search be compared with it and let the proposal be discarded.
+    proposal_id: UUID
+    service_id: str
     service_name: str
     local_date: str
     local_start: str
@@ -71,6 +76,9 @@ class ConversationUpdate:
     history_append: tuple[HistoryEntry, ...]
     offered: tuple[OfferedSlot, ...] | None = None
     pending_review: PendingReview | None = None
+    # The waiting review was withdrawn or replaced in this turn: it is forgotten (unless a new one
+    # replaces it) and this proposal can no longer be confirmed.
+    discarded_proposal: UUID | None = None
 
 
 class AgentState(TypedDict):
@@ -100,5 +108,8 @@ class TurnWorkspace:
     # must not leave the assistant free to choose from the previous list.
     search_attempted: bool = False
     review: PreparedReview | None = None
+    # The review waiting at the start of the turn, and what happened to it in this turn.
+    prior_review: PendingReview | None = None
+    discard_reason: Literal["declined", "changed_search", "replaced"] | None = None
     input_tokens: int = 0
     output_tokens: int = 0

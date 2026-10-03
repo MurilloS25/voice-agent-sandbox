@@ -8,6 +8,7 @@ from uuid import UUID, uuid4
 from fastapi import FastAPI
 from starlette.concurrency import run_in_threadpool
 
+from voice_agent_api.agent.discards import DiscardedProposals
 from voice_agent_api.agent.limits import AgentLimits
 from voice_agent_api.agent.orchestrator import AgentService
 from voice_agent_api.agent.providers import build_chat_model
@@ -116,6 +117,8 @@ def create_app(
     app.state.token_codec = ProposalTokenCodec(key)
     app.state.id_factory = id_factory
     app.state.agent = agent
+    # Reviews the visitor withdrew (empty when there is no agent): consulted when confirming.
+    app.state.discards = agent.discards if agent is not None else DiscardedProposals()
     app.state.speech = speech
     app.state.draining = False
     app.state.ready_check = ready_check

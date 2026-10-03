@@ -9,6 +9,7 @@ from typing import Literal
 
 from voice_agent_api.agent.contracts import (
     AssistantMessageEvent,
+    BookingReviewDiscardedEvent,
     BookingReviewReadyEvent,
     GuardrailEvent,
     ProviderErrorEvent,
@@ -128,6 +129,28 @@ class EventLog:
                 local_end=local_end,
                 timezone=timezone,
                 price_display=price_display,
+            )
+        )
+
+    def booking_review_discarded(
+        self,
+        *,
+        reason: Literal["declined", "changed_search", "replaced"],
+        service_name: str,
+        local_date: str,
+        local_start: str,
+    ) -> None:
+        seq, at = self._next()
+        self._events.append(
+            BookingReviewDiscardedEvent(
+                seq=seq,
+                at=at,
+                kind="booking_review_discarded",
+                actor="tool",
+                reason=reason,
+                service_name=service_name,
+                local_date=local_date,
+                local_start=local_start,
             )
         )
 

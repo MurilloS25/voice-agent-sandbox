@@ -8,6 +8,7 @@ from uuid import UUID
 
 from fastapi import Depends, Request
 
+from voice_agent_api.agent.discards import DiscardedProposals
 from voice_agent_api.agent.orchestrator import AgentService
 from voice_agent_api.api.proposal_tokens import ProposalTokenCodec
 from voice_agent_api.domain.ports import AppointmentBook, BusinessCatalog
@@ -33,6 +34,10 @@ def get_token_codec(request: Request) -> ProposalTokenCodec:
     return cast(ProposalTokenCodec, request.app.state.token_codec)
 
 
+def get_discards(request: Request) -> DiscardedProposals:
+    return cast(DiscardedProposals, request.app.state.discards)
+
+
 def get_id_factory(request: Request) -> IdFactory:
     return cast(IdFactory, request.app.state.id_factory)
 
@@ -54,3 +59,4 @@ AppointmentsDep = Annotated[AppointmentBook, Depends(get_appointments)]
 ClockDep = Annotated[Clock, Depends(get_clock)]
 TokenCodecDep = Annotated[ProposalTokenCodec, Depends(get_token_codec)]
 IdFactoryDep = Annotated[IdFactory, Depends(get_id_factory)]
+DiscardsDep = Annotated[DiscardedProposals, Depends(get_discards)]

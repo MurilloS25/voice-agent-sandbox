@@ -22,6 +22,7 @@ from langchain_core.messages import AIMessage, AnyMessage, HumanMessage
 
 from voice_agent_api.agent.bounded import BoundedCaller, CallTimedOut, Deadline, DeadlineExceeded
 from voice_agent_api.agent.contracts import AgentReply, AgentTurnRequest, AgentTurnResponse
+from voice_agent_api.agent.discards import DiscardedProposals
 from voice_agent_api.agent.errors import AgentBusy
 from voice_agent_api.agent.events import EventLog
 from voice_agent_api.agent.graph import GraphDeps, build_graph
@@ -81,8 +82,12 @@ class AgentService:
         caller: BoundedCaller | None = None,
         monotonic: Callable[[], float] = time.monotonic,
         budget: BudgetGuard | None = None,
+        discards: DiscardedProposals | None = None,
     ) -> None:
         self._budget = budget
+        # Withdrawn reviews, remembered so their tokens can no longer be confirmed. Shared with the
+        # confirmation route through `discards`.
+        self.discards = discards if discards is not None else DiscardedProposals()
         self._limits = limits or AgentLimits()
         self._store = store
         self._model = model
@@ -125,6 +130,8 @@ class AgentService:
             committed = self._store.commit_turn(
                 decision.conversation_id, decision.turn_token, response, update
             )
+            if committed and update.discarded_proposal is not None:
+                self.discards.add(update.discarded_proposal)
             if not committed:
                 raise AgentCommitFailed
             # Counts only: no message text and no identifiers.
@@ -165,7 +172,9 @@ class AgentService:
         events = EventLog(self._clock)
         events.user_message(request.message)
         workspace = TurnWorkspace(
-            reviewable=accepted.snapshot.offered, offered=accepted.snapshot.offered
+            reviewable=accepted.snapshot.offered,
+            offered=accepted.snapshot.offered,
+            prior_review=accepted.snapshot.pending_review,
         )
         stats = _Stats()
         limits = self._limits
@@ -280,6 +289,12 @@ class AgentService:
             if workspace.offered_changed and reply.source == "assistant"
             else None,
             pending_review=review.pending if review is not None else None,
+            # Whatever the reply, a withdrawn or replaced review stays withdrawn.
+            discarded_proposal=(
+                workspace.prior_review.proposal_id
+                if workspace.discard_reason is not None and workspace.prior_review is not None
+                else None
+            ),
         )
         return response, update
 

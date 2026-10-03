@@ -341,4 +341,5 @@ def test_the_model_is_bound_to_exactly_the_allow_listed_tools() -> None:
         "list_services",
         "find_available_slots",
         "prepare_booking_review",
+        "discard_booking_review",
     ]
