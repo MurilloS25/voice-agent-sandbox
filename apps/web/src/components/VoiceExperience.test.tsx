@@ -619,6 +619,25 @@ describe("reading replies aloud", () => {
     );
   });
 
+  it("reads the observed slots reply naturally (U+2011 dates and ranges) and shows it as written", async () => {
+    sendTurn.mockImplementation(async (p: Pending) => ({
+      kind: "ok",
+      turn: agentTurn(p.turnIndex, {
+        reply: {
+          source: "assistant",
+          text: "Slots on 2026\u201110\u201108: 09:00\u201113:00 and 14:00\u201118:00.",
+        },
+      }),
+    }));
+    setup();
+    await startSession();
+    await speakToTheAssistant("first take");
+    await screen.findByText(/Slots on 2026\u201110\u201108/);
+    expect(synth.texts.at(-1)).toBe(
+      "Slots on October 8, 2026: from 9 AM to 1 PM and from 2 PM to 6 PM.",
+    );
+  });
+
   it("never reads a system notice", async () => {
     sendTurn.mockImplementation(async (p: Pending) => ({
       kind: "ok",

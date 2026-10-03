@@ -1037,6 +1037,37 @@ describe("ChatPanel: spoken replies", () => {
     });
   });
 
+  describe("Listen: dates and time ranges", () => {
+    it("speaks the observed reply naturally and shows it exactly as written", async () => {
+      const shown = [
+        "Available slots for Full overhaul on 2026\u201110\u201108:",
+        "",
+        "- S1: 09:00\u201113:00",
+        "- S2: 14:00\u201118:00",
+      ].join("\n");
+      setup();
+      sendTurn.mockImplementationOnce(async (p: Pending) => ({
+        kind: "ok",
+        turn: agentTurn(p.turnIndex, {
+          conversation_id: p.conversationId,
+          client_turn_id: p.clientTurnId,
+          reply: { source: "assistant", text: shown },
+        }),
+      }));
+      await send("What is open?");
+      await screen.findByText(/Available slots for Full overhaul/);
+
+      fireEvent.click(listen());
+
+      expect(textsSpoken()).toBe(
+        "Available slots for Full overhaul on October 8, 2026: - S1: from 9 AM to 1 PM - S2: from 2 PM to 6 PM",
+      );
+      // The page still shows the agent's own characters, untouched.
+      expect(document.body.textContent).toContain("2026\u201110\u201108");
+      expect(document.body.textContent).toContain("09:00\u201113:00");
+    });
+  });
+
   describe("Listen and Stop", () => {
     it("reads one assistant reply, then Stop silences it", async () => {
       setup();
