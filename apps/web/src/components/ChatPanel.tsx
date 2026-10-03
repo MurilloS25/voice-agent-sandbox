@@ -18,6 +18,8 @@ import {
   normalizeMessage,
 } from "@/lib/agent-message";
 import { draftFor } from "@/lib/assistant-link";
+import { useApiReadiness } from "@/lib/readiness";
+import { reviewStatus } from "@/lib/review-state";
 import { newUuid } from "@/lib/uuid";
 import {
   PREVIEW_SPEECH_ID,
@@ -52,13 +54,14 @@ type Phase =
       retryAfterS: number | null;
       attempt: number;
     }
-  | { kind: "unavailable" } // no assistant is configured
+  // No assistant is configured, or (`reason: "limit"`) today's demo allowance is spent.
+  | { kind: "unavailable"; reason?: "limit" }
   | { kind: "ended"; reason: EndReason };
 
 const END_COPY: Record<EndReason, { title: string; body: string }> = {
   not_found: {
     title: "This conversation can't continue",
-    body: "The assistant no longer has it, for example because it was restarted.",
+    body: "The assistant restarted and no longer has it. Bookings you already confirmed are saved.",
   },
   expired: {
     title: "This conversation expired",
@@ -155,10 +158,19 @@ const toolbarButton =
 export function ChatPanel({
   initialDraft = "",
   initialMode = "voice",
+  assumeReady = false,
 }: {
   initialDraft?: string;
   initialMode?: AssistantMode;
+  /** Skip the readiness check (stories and tests). The page never sets it. */
+  assumeReady?: boolean;
 }) {
+  // Whether the backend can serve. Until it says so nothing is sent to it: a sleeping API shows
+  // "Starting workshop assistant…", not a failed turn.
+  const readiness = useApiReadiness({
+    initial: assumeReady ? "ready" : "checking",
+  });
+  const apiReady = readiness.state === "ready";
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [turns, setTurns] = useState<Turn[]>([]);
   const [earlier, setEarlier] = useState<Conversation[]>([]);
@@ -462,6 +474,10 @@ export function ChatPanel({
         setPending(null);
         setPhase({ kind: "unavailable" });
         break;
+      case "limit_reached":
+        setPending(null);
+        setPhase({ kind: "unavailable", reason: "limit" });
+        break;
       case "ended":
         setPending(submission);
         setPhase({ kind: "ended", reason: outcome.reason });
@@ -474,6 +490,7 @@ export function ChatPanel({
   }
 
   function submit(afterUnavailable = false, spoken?: string) {
+    if (!apiReady) return; // nothing reaches the backend before it says it is ready
     if (inFlight.current || pending) return;
     if (phase.kind === "ended") return;
     if (phase.kind === "unavailable" && !afterUnavailable) return;
@@ -558,6 +575,7 @@ export function ChatPanel({
    * turns on automatic reading of replies that arrive from now on, and it never records.
    */
   function startSession() {
+    if (!apiReady) return;
     voiceLiveRef.current = true;
     setSessionActive(true);
     // The full introduction only for a conversation that has not begun. With real messages the
@@ -625,10 +643,10 @@ export function ChatPanel({
     phase.kind === "invalid" ||
     phase.kind === "rejected" ||
     phase.kind === "unavailable";
-  const liveReviewTurn = ended
-    ? null
-    : ([...turns].reverse().find((t) => t.response.booking_review)?.response
-        .turn_index ?? null);
+  // Which review can still be confirmed: only the latest one, and only while no later turn
+  // withdrew it (a review is a pending proposal; the server refuses a withdrawn one too).
+  const reviews = reviewStatus(turns);
+  const liveReviewTurn = ended ? null : reviews.live;
   const liveReview =
     liveReviewTurn === null
       ? null
@@ -689,10 +707,18 @@ export function ChatPanel({
         </button>
       </Notice>
     ) : phase.kind === "unavailable" ? (
-      <Notice title="The assistant isn't switched on" noticeRef={noticeRef}>
+      <Notice
+        title={
+          phase.reason === "limit"
+            ? "The demo has reached its daily limit"
+            : "The assistant isn't switched on"
+        }
+        noticeRef={noticeRef}
+      >
         <p>
-          This demo has no assistant connected right now. Try again in a moment,
-          or go back to the workshop page.
+          {phase.reason === "limit"
+            ? "The workshop assistant is paused until tomorrow to keep this demo within its budget. Your messages stay on this page."
+            : "This demo has no assistant connected right now. Try again in a moment, or go back to the workshop page."}
         </p>
         <div className="flex flex-wrap items-center gap-4">
           <button type="button" onClick={tryAgain} className={buttonClass}>
@@ -789,7 +815,7 @@ export function ChatPanel({
         showActions={
           variant === "text" && turns.length === 0 && !showSending && !unsent
         }
-        disabled={sending || phase.kind === "unavailable"}
+        disabled={sending || phase.kind === "unavailable" || !apiReady}
         boxHasText={draft.trim() !== ""}
       />
 
@@ -800,6 +826,7 @@ export function ChatPanel({
           thinking={showSending !== null}
           readOnly={ended}
           liveReviewTurn={liveReviewTurn}
+          discardedReviewTurns={reviews.discarded}
           liveReviewElsewhere={variant === "panel"}
           focusTurn={variant === "text" ? focusTurn : null}
           idPrefix={variant === "text" ? "current" : "panel"}
@@ -948,6 +975,8 @@ export function ChatPanel({
       }
       onSwitchToText={() => chooseMode("text")}
       footer={voiceFooter}
+      readiness={readiness.state}
+      onRetryReadiness={readiness.retry}
       autoSend={!speechState.settings.reviewBeforeSending}
       exchangeHidden={panel === "transcript"}
     />
@@ -978,6 +1007,32 @@ export function ChatPanel({
           }}
           className="max-h-[60%] shrink-0 overflow-y-auto rounded-b-3xl border-t border-bottle/15 bg-cream px-4 py-3 sm:px-6"
         >
+          {apiReady ? null : (
+            <div
+              role="status"
+              className="mb-2 rounded-2xl border-l-8 border-bottle bg-white p-3"
+            >
+              <p className="font-bold">
+                {readiness.state === "unreachable"
+                  ? "The assistant isn't responding"
+                  : "Starting workshop assistant…"}
+              </p>
+              <p className="text-sm">
+                {readiness.state === "unreachable"
+                  ? "It did not wake up in time. Nothing was sent. You can try again."
+                  : "The first visit after a quiet period can take about a minute. Nothing is sent until it is ready."}
+              </p>
+              {readiness.state === "unreachable" ? (
+                <button
+                  type="button"
+                  onClick={readiness.retry}
+                  className={`${secondaryButtonClass} mt-2`}
+                >
+                  Retry
+                </button>
+              ) : null}
+            </div>
+          )}
           <div className="flex flex-wrap items-baseline justify-between gap-x-4">
             <label htmlFor="message" className="text-sm font-bold">
               Your message
@@ -1037,11 +1092,11 @@ export function ChatPanel({
             onRecordingStart={onRecordingStart}
             onTranscript={addTranscript}
             onReviewChange={setReviewing}
-            disabled={sending || phase.kind === "unavailable"}
+            disabled={sending || phase.kind === "unavailable" || !apiReady}
             actions={
               <button
                 type="submit"
-                disabled={sending || phase.kind === "unavailable"}
+                disabled={sending || phase.kind === "unavailable" || !apiReady}
                 aria-busy={sending}
                 className={buttonClass}
               >

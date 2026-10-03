@@ -7,11 +7,14 @@ it would block the event loop for every other request. A test enforces this.
 
 import logging
 import re
+import time
+from collections.abc import Callable
 from datetime import date
 from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import APIRouter, Query, Response
+from fastapi import APIRouter, Query, Request, Response
+from fastapi.responses import JSONResponse
 from pydantic import BeforeValidator
 
 from voice_agent_api.agent.contracts import AgentTurnRequest, AgentTurnResponse
@@ -21,6 +24,7 @@ from voice_agent_api.api.dependencies import (
     AppointmentsDep,
     CatalogDep,
     ClockDep,
+    DiscardsDep,
     IdFactoryDep,
     TokenCodecDep,
 )
@@ -38,6 +42,7 @@ from voice_agent_api.api.schemas import (
     HealthResponse,
     MoneyResponse,
     OpeningIntervalResponse,
+    ReadinessResponse,
     ServicesResponse,
     SlotResponse,
 )
@@ -48,6 +53,7 @@ from voice_agent_api.domain.models import Appointment
 from voice_agent_api.domain.queries import query_availability
 
 router = APIRouter()
+_NO_STORE = {"Cache-Control": "no-store"}
 logger = logging.getLogger("voice_agent_api")
 
 _DATE_ONLY = re.compile(r"\d{4}-\d{2}-\d{2}")
@@ -85,7 +91,10 @@ _CONFIRM_ERRORS: dict[int | str, dict[str, Any]] = {
     },
     409: {
         "model": ErrorResponse,
-        "description": "slot_unavailable (just taken) or proposal_stale (details changed).",
+        "description": (
+            "slot_unavailable (just taken), proposal_stale (details changed) or "
+            "proposal_discarded (the visitor withdrew this review: nothing is booked)."
+        ),
     },
     422: {
         "model": ErrorResponse,
@@ -130,8 +139,43 @@ def _appointment_response(appointment: Appointment) -> AppointmentResponse:
 
 
 @router.get("/health", response_model=HealthResponse, tags=["system"])
+@router.get("/health/live", response_model=HealthResponse, tags=["system"])
 def health() -> HealthResponse:
+    """The process is up. It touches nothing: no database, no provider."""
     return HealthResponse(status="ok")
+
+
+# The readiness probe is public, so its database query is answered from a short cache: a flood of
+# anonymous probes cannot tie up the small connection pool that real turns and bookings need.
+_READY_CACHE_S = 5.0
+
+
+def _database_answers(state: Any, check: Callable[[], bool]) -> bool:
+    now = time.monotonic()
+    cached = getattr(state, "ready_cache", None)
+    if cached is not None and now - cached[0] < _READY_CACHE_S:
+        return bool(cached[1])
+    answer = bool(check())
+    state.ready_cache = (now, answer)
+    return answer
+
+
+@router.get(
+    "/health/ready",
+    response_model=ReadinessResponse,
+    tags=["system"],
+    responses={503: {"model": ReadinessResponse, "description": "Not ready, or draining."}},
+)
+def health_ready(request: Request) -> Response:
+    """Ready to serve: not shutting down and, with PostgreSQL, the database answers a minimal
+    query. A status word only; never a host, a role, a version or a setting."""
+    state = request.app.state
+    if getattr(state, "draining", False):
+        return JSONResponse({"status": "draining"}, status_code=503, headers=_NO_STORE)
+    check = getattr(state, "ready_check", None)
+    if check is not None and not _database_answers(state, check):
+        return JSONResponse({"status": "unavailable"}, status_code=503, headers=_NO_STORE)
+    return JSONResponse({"status": "ready"}, headers=_NO_STORE)
 
 
 @router.get(
@@ -232,10 +276,13 @@ def confirm_appointment_route(
     appointments: AppointmentsDep,
     clock: ClockDep,
     codec: TokenCodecDep,
+    discards: DiscardsDep,
 ) -> AppointmentResponse:
     """The only write. Requires a valid proposal token and an explicit `confirm: true`."""
     proposal = codec.decode(body.proposal_token)
-    appointment, created = confirm_appointment(appointments, proposal, clock())
+    appointment, created = confirm_appointment(
+        appointments, proposal, clock(), is_discarded=discards.__contains__
+    )
     if not created:
         response.status_code = 200
     # Audit trail: the sanitized outcome only. Never an identifier (the appointment's included),
@@ -271,7 +318,14 @@ _AGENT_TURN_ERRORS: dict[int | str, dict[str, Any]] = {
         "description": "agent_busy.",
         "headers": _retry_after("Seconds to wait before retrying."),
     },
-    503: {"model": ErrorResponse, "description": "agent_unavailable: no provider is configured."},
+    503: {
+        "model": ErrorResponse,
+        "description": (
+            "agent_unavailable (no provider is configured), demo_budget_reached (today's "
+            "allowance is used up), budget_unavailable (the budget could not be checked) or "
+            "service_draining (the process is shutting down). The provider was not called."
+        ),
+    },
 }
 
 

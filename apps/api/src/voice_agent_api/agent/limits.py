@@ -35,6 +35,7 @@ class AgentLimits:
             turn_deadline_s=settings.agent_turn_deadline_s,
             model_timeout_s=settings.agent_model_timeout_s,
             tool_timeout_s=settings.agent_tool_timeout_s,
+            max_in_flight_turns=settings.agent_max_in_flight,
         )
 
     @property

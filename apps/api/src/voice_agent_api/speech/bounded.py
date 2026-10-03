@@ -22,6 +22,9 @@ import threading
 from collections.abc import AsyncGenerator, AsyncIterator
 from concurrent.futures import Future, ThreadPoolExecutor
 
+from starlette.concurrency import run_in_threadpool
+
+from voice_agent_api.budget.guard import BudgetGuard, Reservation
 from voice_agent_api.speech.contracts import AudioClip, Transcript
 from voice_agent_api.speech.errors import (
     AudioInvalid,
@@ -122,8 +125,14 @@ class _Slots:
 class SpeechService:
     """Runs a `SpeechToText` port off the event loop with a slot limit and a deadline."""
 
-    def __init__(self, port: SpeechToText, limits: SpeechLimits | None = None) -> None:
+    def __init__(
+        self,
+        port: SpeechToText,
+        limits: SpeechLimits | None = None,
+        budget: BudgetGuard | None = None,
+    ) -> None:
         self.limits = limits or SpeechLimits()
+        self._budget = budget
         self._port = port
         self._slots = _Slots(self.limits.max_concurrent)
         # As many workers as slots: an admitted call never queues behind an abandoned one.
@@ -143,10 +152,21 @@ class SpeechService:
             raise SpeechUnavailable
         if not self._slots.try_acquire():
             raise SpeechBusy
+        reservation: Reservation | None = None
+        if self._budget is not None:
+            # Seconds are reserved before the provider is contacted (a blocking database call,
+            # so off the event loop). A refusal frees the slot and costs nothing.
+            try:
+                reservation = await run_in_threadpool(self._budget.reserve_speech, len(clip.data))
+            except BaseException:
+                self._slots.release()
+                raise
         try:
             future = self._executor.submit(self._run, clip)
-        except RuntimeError:  # the pool was shut down
+        except RuntimeError:  # the pool was shut down: the provider was never contacted
             self._slots.release()
+            if self._budget is not None and reservation is not None:
+                await run_in_threadpool(self._budget.refund, reservation)
             raise SpeechUnavailable from None
         future.add_done_callback(self._release)
 

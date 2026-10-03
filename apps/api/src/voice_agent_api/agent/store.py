@@ -137,6 +137,12 @@ class InMemoryConversationStore:
         self._index: dict[UUID, UUID] = {}
         self._tombstones: OrderedDict[UUID, None] = OrderedDict()
 
+    def clear(self) -> None:
+        """Forget every conversation (the process is shutting down)."""
+        with self._lock:
+            self._entries.clear()
+            self._tombstones.clear()
+
     def begin_turn(self, request: AgentTurnRequest) -> Cached | Accepted:
         with self._lock:
             now = self._clock()
@@ -213,6 +219,8 @@ class InMemoryConversationStore:
                 entry.offered = update.offered
             if update.pending_review is not None:
                 entry.pending_review = update.pending_review
+            elif update.discarded_proposal is not None:
+                entry.pending_review = None
             entry.in_flight = None
             entry.last_active = self._clock()
             return True

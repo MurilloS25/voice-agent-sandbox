@@ -32,7 +32,12 @@ API, run from `apps/api`:
 | Regenerate `openapi.json` | `python -m uv run python -m voice_agent_api.openapi` |
 | Generate local secrets into `apps/api/.env` (names only are printed) | `python -m uv run python -m voice_agent_api.devtools.secrets generate` |
 | Validate `.env` (pass or fail per name) / also open one connection | `python -m uv run python -m voice_agent_api.devtools.secrets check` / `check --connect` |
+| Build the API image (context = repository root) | `docker build -f apps/api/Dockerfile -t voice-agent-api .` |
 | Reset fictional demo appointments (postgres mode only) | `python -m uv run python -m voice_agent_api.demo_reset` |
+
+Local development needs `APP_ENV=development` and `API_AUTH_MODE=disabled` (the shipped `apps/api/.env.example` sets both): the default environment is **production**, which requires `API_SHARED_SECRET` and refuses unsafe settings. `apps/api/.env.production.example` and `apps/web/.env.production.example` list the production variables by name only.
+
+Production-mode check with Docker (no network, fake values, nothing real): `docker run -d --network none -e API_SHARED_SECRET=<32+ fake chars> -e PROPOSAL_SIGNING_KEY=<fake base64url of 32 random bytes> -e APPOINTMENT_STORE=memory voice-agent-api`, then probe `/health/live` and `/health/ready` with `docker exec`. Without those variables the container exits 1 naming only the failed setting. Verified at G3 on Docker 29.6.1.
 
 Web, run from `apps/web` (copy `.env.example` to `.env.local` only if the API is not at the default address):
 
@@ -97,7 +102,7 @@ Verifying against the real database (done once for Milestone 2; repeat after DB-
 
 Server-side SSL enforcement is not enabled (it reboots the database); clients already use `sslmode=verify-full`.
 
-Rotation or suspected leak: `secrets generate --rotate`, run `\password voice_agent_api` again with the new `DB_PASSWORD`, and restart the API. The old password stops working immediately. A rotated signing key invalidates reviews that are open (they last 10 minutes).
+Rotation or suspected leak: `secrets generate --rotate`, run `\password voice_agent_api` again with the new `DB_PASSWORD`, and restart the API. The old password stops working immediately. The role has one password, shared by local development and the Render service: once Render exists, update both together (set the new value in the Render dashboard, then run `\password`, then restart or redeploy). A rotated signing key invalidates reviews that are open (they last 10 minutes).
 
 After `db push`, these queries should return nothing for the first and `false, false, false, true, false, false` for the second (the same checks run in `tests/integration`):
 

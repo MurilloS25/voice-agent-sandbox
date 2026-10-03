@@ -127,11 +127,12 @@ def test_env_example_holds_placeholders_only() -> None:
         "AGENT_MAX_OUTPUT_TOKENS": "512",
         "AGENT_REASONING_EFFORT": "low",
         "AGENT_REASONING_CONTROL": "include_reasoning",
-        "APP_ENV": "production",
+        "APP_ENV": "development",
+        "API_AUTH_MODE": "disabled",
         "SPEECH_PROVIDER": "disabled",
         "SPEECH_TIMEOUT_S": "6",
         "SPEECH_READ_TIMEOUT_S": "3",
-        "SPEECH_MAX_AUDIO_BYTES": "524288",
+        "SPEECH_MAX_AUDIO_BYTES": "262144",
         "SPEECH_MAX_CONCURRENT": "2",
     }
     for name, value in example.items():
@@ -197,7 +198,8 @@ def test_check_passes_a_selected_provider_and_never_prints_the_key(
 ) -> None:
     fake = "fake-offline-credential-for-tests-0001"
     env = filled_env(
-        tmp_path, f"AGENT_PROVIDER=groq\nGROQ_API_KEY={fake}\nAGENT_MODEL=some/model-id\n"
+        tmp_path,
+        f"APP_ENV=test\nAGENT_PROVIDER=groq\nGROQ_API_KEY={fake}\nAGENT_MODEL=some/model-id\n",
     )
     capsys.readouterr()
 
@@ -296,7 +298,7 @@ def test_check_passes_groq_speech_and_never_prints_the_key_or_model(
     fake = "fake-offline-credential-for-tests-0001"
     env = filled_env(
         tmp_path,
-        f"SPEECH_PROVIDER=groq\nGROQ_API_KEY={fake}\nSPEECH_MODEL=some/whisper-model\n",
+        f"APP_ENV=test\nSPEECH_PROVIDER=groq\nGROQ_API_KEY={fake}\nSPEECH_MODEL=some/whisper-model\n",
     )
     capsys.readouterr()
     assert devtool.main(["--env-file", str(env), "check"]) == 0
@@ -307,7 +309,10 @@ def test_check_passes_groq_speech_and_never_prints_the_key_or_model(
 
 def test_env_example_with_speech_selected_is_rejected_by_name(no_speech_env: None) -> None:
     settings = load_settings(env_file=str(API_ROOT / ".env.example"))
-    assert settings.speech_provider == "disabled" and settings.app_env == "production"
+    assert settings.speech_provider == "disabled" and settings.app_env == "development"
+    # Selecting a provider with only the example's placeholders is refused by name, and the
+    # offline fake never runs in production.
     for provider in ("fake", "groq"):
+        production = {"speech_provider": provider, "app_env": "production"}
         with pytest.raises(ConfigError):
-            validate_settings(settings.model_copy(update={"speech_provider": provider}))
+            validate_settings(settings.model_copy(update=production))

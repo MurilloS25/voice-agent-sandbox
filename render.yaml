@@ -1,0 +1,59 @@
+# Render Blueprint for the API only (the web app is on Vercel). No value here is secret:
+# every `sync: false` variable is typed into the Render dashboard when the service is created.
+# Nothing is deployed until the owner connects this repository (gate G5).
+services:
+  - type: web
+    name: voice-agent-api
+    runtime: docker
+    # One instance by definition: the Free plan cannot scale, and the in-memory conversations and
+    # limits require exactly one. No scaling or shutdown-delay field is declared (Free rejects them).
+    plan: free # approved topology; an always-on plan would be an optional future change of this one line
+    region: virginia # US East, next to the Supabase project in us-east-1 (decision D3)
+    dockerfilePath: ./apps/api/Dockerfile
+    dockerContext: .
+    healthCheckPath: /health/live # a database blip must not restart the only instance (it holds the conversations)
+    autoDeploy: false # deploys are deliberate
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: APPOINTMENT_STORE
+        value: postgres
+      - key: AGENT_PROVIDER
+        value: groq
+      - key: SPEECH_PROVIDER
+        value: groq
+      - key: DB_PORT
+        value: "5432"
+      - key: DB_NAME
+        value: postgres
+      - key: DB_SSLMODE
+        value: verify-full
+      - key: DB_SSLROOTCERT
+        value: /app/certs/supabase-ca.crt
+      - key: DB_POOL_MAX
+        value: "5"
+      - key: BUDGET_ENFORCED
+        value: "true"
+      - key: RATE_LIMIT_ENABLED
+        value: "true"
+      - key: AGENT_MAX_IN_FLIGHT
+        value: "2"
+      - key: SPEECH_MAX_CONCURRENT
+        value: "2"
+      # Entered in the dashboard only:
+      - key: API_SHARED_SECRET
+        sync: false
+      - key: PROPOSAL_SIGNING_KEY
+        sync: false
+      - key: DB_HOST
+        sync: false
+      - key: DB_USER
+        sync: false
+      - key: DB_PASSWORD
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: AGENT_MODEL
+        sync: false
+      - key: SPEECH_MODEL
+        sync: false

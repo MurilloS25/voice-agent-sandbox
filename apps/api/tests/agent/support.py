@@ -124,6 +124,7 @@ class AgentWorld:
         wrap_book: Callable[[InMemoryAppointmentBook], Any] | None = None,
         wrap_catalog: Callable[[Any], Any] | None = None,
         chat_model: BaseChatModel | None = None,
+        budget: Any = None,
     ) -> None:
         catalog, self.book = make_world(bookings)
         self.catalog = wrap_catalog(catalog) if wrap_catalog else catalog
@@ -140,6 +141,7 @@ class AgentWorld:
             encode=self.codec.encode,
             clock=lambda: NOW,
             limits=limits or AgentLimits(),
+            budget=budget,
         )
         self.conversation_id = uuid4()
         self.turn_index = 0

@@ -211,11 +211,11 @@ describe("recording", () => {
 
   it("accepts a recording exactly at the size limit", async () => {
     media = installMedia();
-    FakeRecorder.bytes = 512 * 1024;
+    FakeRecorder.bytes = 256 * 1024;
     const capture = await startCapture();
     vi.advanceTimersByTime(2000);
     capture.stop();
-    expect((await capture.result).blob.size).toBe(512 * 1024);
+    expect((await capture.result).blob.size).toBe(256 * 1024);
   });
 
   it("rejects an empty recording", async () => {

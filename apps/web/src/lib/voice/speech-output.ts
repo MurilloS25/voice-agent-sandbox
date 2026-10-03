@@ -68,31 +68,86 @@ function spokenDate(
   return `${MONTHS[month - 1]} ${day}, ${year}`;
 }
 
+// Every dash a language model (or a word processor) may use for a hyphen: ASCII hyphen-minus,
+// U+2010 hyphen, U+2011 non-breaking hyphen, U+2012 figure dash, U+2013 en dash, U+2014 em dash and
+// U+2212 minus sign. The real replies used U+2011, which the ASCII-only recognisers missed.
+const DASH = "\\-\u2010\u2011\u2012\u2013\u2014\u2212";
+
 // A date is recognised only as a whole token: not inside a longer word, number, identifier or
 // path (so UUIDs, tokens, versions and phone numbers are left alone), and not when more digits
-// follow after a dot, slash or hyphen.
-const ISO_DATE = /(?<![\w./-])(\d{4})-(\d{2})-(\d{2})(?![\w-]|[./]\d)/g;
-const US_DATE =
-  /(?<![\w./-])(\d{1,2})([/-])(\d{1,2})\2(\d{4})(?![\w/-]|[.]\d)/g;
+// follow after a dot, slash or dash.
+const ISO_DATE = new RegExp(
+  `(?<![\\w./${DASH}])(\\d{4})([${DASH}])(\\d{2})\\2(\\d{2})(?![\\w${DASH}]|[./]\\d)`,
+  "g",
+);
+const US_DATE = new RegExp(
+  `(?<![\\w./${DASH}])(\\d{1,2})([/${DASH}])(\\d{1,2})\\2(\\d{4})(?![\\w/${DASH}]|[.]\\d)`,
+  "g",
+);
+// A time range `HH:MM` to `HH:MM` (24-hour), with a dash and optional spaces around it. A whole
+// token as well: not inside a word, not part of a longer clock (`09:00:00`), a chain of ranges,
+// an ISO timestamp (`T09:00-05:00`) or an offset.
+const TIME_RANGE = new RegExp(
+  `(?<![\\w:./${DASH}])((?:[Ff]rom|[Bb]etween)[ \t]+)?(\\d{2}):(\\d{2})[ \t]*[${DASH}][ \t]*(\\d{2}):(\\d{2})(?![\\w:/]|[.]\\d|[${DASH}]\\d|[ \t]*[AaPp]\\.?[Mm])`,
+  "g",
+);
+
+/** "9 AM", "9:15 AM", "noon" or "midnight" for a 24-hour time, `undefined` if it is not a time. */
+function spokenTime(hour: number, minute: number): string | undefined {
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return undefined;
+  if (minute === 0 && hour === 0) return "midnight";
+  if (minute === 0 && hour === 12) return "noon";
+  const twelve = hour % 12 === 0 ? 12 : hour % 12;
+  const clock =
+    minute === 0 ? `${twelve}` : `${twelve}:${String(minute).padStart(2, "0")}`;
+  return `${clock} ${hour < 12 ? "AM" : "PM"}`;
+}
 
 /**
  * The text as it should be spoken. Only this changes: what is shown on the page is never touched.
  *
  * English (United States) only. The unambiguous numeric dates `YYYY-MM-DD`, `MM/DD/YYYY` and
- * `MM-DD-YYYY` (month first, as in en-US) become "October 1, 2026", so the voice says a date and
- * not separate digits. A date that does not exist (2026-02-30, month 13, a day 31 in a 30-day
- * month, 29 February in a common year) is left exactly as written, and so is everything that is
- * not a date: times, prices, phone numbers, quantities, identifiers, tokens and lone numbers.
+ * `MM-DD-YYYY` (month first, as in en-US) become "October 1, 2026", and a 24-hour range such as
+ * `09:00-13:00` becomes "from 9 AM to 1 PM" (00:00 is "midnight" and 12:00 "noon"), so the voice
+ * says a date and a time and not separate digits. The separator may be any of the dashes in
+ * `DASH`. A date or time that does not exist (2026-02-30, month 13, 25:00, minute 60) is left
+ * exactly as written, and so is everything that is not a date or a range: full ISO timestamps,
+ * clock times with seconds, prices, phone numbers, versions, quantities, identifiers, UUIDs,
+ * tokens and lone numbers. Validation uses the parts alone (no `Date`), so the machine's time zone
+ * cannot change the result, and applying the function twice gives the same text as once.
  */
 export function prepareTextForSpeech(text: string): string {
   return text
-    .replace(ISO_DATE, (match, year: string, month: string, day: string) => {
-      return spokenDate(Number(month), Number(day), Number(year)) ?? match;
-    })
+    .replace(
+      ISO_DATE,
+      (match, year: string, _dash: string, month: string, day: string) => {
+        return spokenDate(Number(month), Number(day), Number(year)) ?? match;
+      },
+    )
     .replace(
       US_DATE,
       (match, month: string, _separator: string, day: string, year: string) => {
         return spokenDate(Number(month), Number(day), Number(year)) ?? match;
+      },
+    )
+    .replace(
+      TIME_RANGE,
+      (
+        match,
+        lead: string | undefined,
+        h1: string,
+        m1: string,
+        h2: string,
+        m2: string,
+      ) => {
+        const from = spokenTime(Number(h1), Number(m1));
+        const to = spokenTime(Number(h2), Number(m2));
+        if (from === undefined || to === undefined) return match;
+        // "between 09:00-13:00" is "between 9 AM and 1 PM"; otherwise "from ... to ...", and a
+        // leading "from" is absorbed so it is not said twice.
+        return lead?.toLowerCase().startsWith("between")
+          ? `between ${from} and ${to}`
+          : `from ${from} to ${to}`;
       },
     );
 }

@@ -216,6 +216,7 @@ def groq_settings(**overrides: object) -> Settings:
         "agent_provider": "groq",
         "groq_api_key": SecretStr("fake-offline-credential-for-tests-0001"),
         "agent_model": "some/model-id",
+        "app_env": "test",  # production also needs PostgreSQL for the budget (plan 0007)
     }
     values.update(overrides)
     return Settings(_env_file=None, **values)  # type: ignore[arg-type]

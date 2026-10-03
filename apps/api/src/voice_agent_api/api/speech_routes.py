@@ -62,7 +62,7 @@ DeclaredDurationMs = Annotated[
 ]
 
 _SPEECH_ERRORS: dict[int | str, dict[str, Any]] = {
-    413: {"model": ErrorResponse, "description": "audio_too_large: more than 512 KB."},
+    413: {"model": ErrorResponse, "description": "audio_too_large: more than 256 KB."},
     415: {
         "model": ErrorResponse,
         "description": "audio_unsupported: type not allowed, or the signature does not match it.",
@@ -82,7 +82,13 @@ _SPEECH_ERRORS: dict[int | str, dict[str, Any]] = {
         },
     },
     502: {"model": ErrorResponse, "description": "transcription_failed."},
-    503: {"model": ErrorResponse, "description": "speech_unavailable: no provider is configured."},
+    503: {
+        "model": ErrorResponse,
+        "description": (
+            "speech_unavailable (no provider is configured), demo_budget_reached, "
+            "budget_unavailable or service_draining. The provider was not called."
+        ),
+    },
     504: {"model": ErrorResponse, "description": "transcription_timeout."},
 }
 
@@ -90,7 +96,7 @@ _SPEECH_ERRORS: dict[int | str, dict[str, Any]] = {
 _AUDIO_BODY: dict[str, Any] = {
     "requestBody": {
         "required": True,
-        "description": "The raw audio bytes of one short recording (at most 512 KB).",
+        "description": "The raw audio bytes of one short recording (at most 256 KB).",
         "content": {
             media_type: {"schema": {"type": "string", "format": "binary"}}
             for media_type in ("audio/webm", "audio/ogg", "audio/mp4", "audio/wav")

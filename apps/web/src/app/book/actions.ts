@@ -29,12 +29,17 @@ export async function confirmBooking(
     redirect(`/appointments/${encodeURIComponent(result.data.id)}`);
   }
   if (result.kind === "unavailable") return { kind: "unavailable" };
+  // Too many requests: refused before anything was saved, and confirming is idempotent, so the
+  // visitor can simply try again in a moment.
+  if (result.code === "rate_limited") return { kind: "unavailable" };
 
   switch (result.code) {
     case "slot_unavailable":
       return { kind: "conflict" };
     case "proposal_stale":
       return { kind: "stale" };
+    case "proposal_discarded":
+      return { kind: "discarded" };
     case "proposal_expired":
       return { kind: "expired" };
     case "proposal_invalid":

@@ -370,6 +370,6 @@ def test_an_unexpected_error_logs_the_route_template_never_the_appointment_id(
     assert response.status_code == 500
     assert response.json()["error"]["code"] == "internal_error"
     messages = [r.getMessage() for r in caplog.records]
-    assert "Unhandled error on GET /v1/appointments/{appointment_id}" in messages
+    assert "Unhandled error on GET /v1/appointments/{appointment_id} error=RuntimeError" in messages
     assert requested not in caplog.text
     assert not re.search(UUID_SHAPE, caplog.text)

@@ -11,6 +11,12 @@ class HealthResponse(BaseModel):
     status: Literal["ok"]
 
 
+class ReadinessResponse(BaseModel):
+    """Only a status word: no host, version, role or configuration."""
+
+    status: Literal["ready", "draining", "unavailable"]
+
+
 class MoneyResponse(BaseModel):
     amount_minor: int = Field(description="Amount in the currency's minor unit (e.g. cents).")
     currency: str = Field(description="ISO 4217 currency code.")

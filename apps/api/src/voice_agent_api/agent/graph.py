@@ -34,6 +34,7 @@ from voice_agent_api.agent.providers import classify_provider_error
 from voice_agent_api.agent.state import AgentState, TurnWorkspace
 from voice_agent_api.agent.tools import (
     TOOLS,
+    FindAvailableSlotsArgs,
     ToolExecutor,
     ToolOutcome,
     issue_codes,
@@ -102,6 +103,22 @@ def _normalize_tool_calls(message: AIMessage, cap: int) -> tuple[AIMessage, bool
     return normalized, truncated
 
 
+_REPLACED_CONTENT = (
+    '{"status":"ok","discarded":false,"note":"A new review was just prepared: it replaced the '
+    'old one and is the one shown below. Nothing more to withdraw."}'
+)
+
+
+def _discard_content(discarded: bool) -> str:
+    if discarded:
+        return (
+            '{"status":"ok","discarded":true,"note":"The review was withdrawn and can no longer '
+            "be confirmed. Withdrawing books and cancels nothing: a review is only a proposal. "
+            'If the visitor gave a new date, time or service, search for it now."}'
+        )
+    return '{"status":"ok","discarded":false,"note":"No booking review was waiting."}'
+
+
 def _reject_tool_call(call_id: str, code: str) -> ToolMessage:
     return ToolMessage(content=f'{{"status":"rejected","code":"{code}"}}', tool_call_id=call_id)
 
@@ -156,6 +173,24 @@ def build_graph(deps: GraphDeps) -> CompiledStateGraph[Any, Any, Any, Any]:
             return {**update, "degraded": "model_bad_output"}
         return {**update, "reply_text": text}
 
+    def discard_prior(
+        reason: Literal["declined", "changed_search", "replaced"], now: datetime
+    ) -> bool:
+        """Withdraw the review that was waiting at the start of the turn, once per turn. True if
+        there was an active one. An expired review cannot be confirmed anyway, so it is not
+        announced."""
+        prior = workspace.prior_review
+        if prior is None or workspace.discard_reason is not None or now >= prior.expires_at:
+            return False
+        workspace.discard_reason = reason
+        events.booking_review_discarded(
+            reason=reason,
+            service_name=prior.service_name,
+            local_date=prior.local_date,
+            local_start=prior.local_start,
+        )
+        return True
+
     def tools_node(state: AgentState) -> dict[str, Any]:
         last = state["messages"][-1]
         assert isinstance(last, AIMessage)
@@ -197,6 +232,38 @@ def build_graph(deps: GraphDeps) -> CompiledStateGraph[Any, Any, Any, Any]:
             executed += 1
             started = time.monotonic()
             now = deps.clock()
+            if name == "discard_booking_review":
+                if workspace.review is not None:
+                    # A review was prepared earlier in this turn: it replaced the old one and is
+                    # the one on screen, so there is nothing more to withdraw.
+                    events.tool_result(
+                        name, "ok", 0, "A new review replaced the waiting one.", None
+                    )
+                    results.append(ToolMessage(content=_REPLACED_CONTENT, tool_call_id=call_id))
+                    continue
+                discarded = discard_prior("declined", now)
+                events.tool_result(
+                    name,
+                    "ok",
+                    0,
+                    "Discarded the waiting booking review."
+                    if discarded
+                    else "No booking review was waiting.",
+                    None,
+                )
+                results.append(
+                    ToolMessage(content=_discard_content(discarded), tool_call_id=call_id)
+                )
+                continue
+            if isinstance(args, FindAvailableSlotsArgs):
+                prior = workspace.prior_review
+                if prior is not None and (args.service_id, args.date.isoformat()) != (
+                    prior.service_id,
+                    prior.local_date,
+                ):
+                    # A search for another service or day replaces what the visitor was shown, so
+                    # the waiting review goes with it, whatever the model writes next.
+                    discard_prior("changed_search", now)
             offered = workspace.reviewable  # never this turn's own search results
             searched = workspace.search_attempted or workspace.offered_changed
             try:
@@ -236,6 +303,7 @@ def build_graph(deps: GraphDeps) -> CompiledStateGraph[Any, Any, Any, Any]:
                 workspace.offered = outcome.offered
                 workspace.offered_changed = True
             if outcome.review is not None:
+                discard_prior("replaced", now)  # a new review supersedes the waiting one
                 workspace.review = outcome.review
                 pending = outcome.review.pending
                 events.booking_review_ready(

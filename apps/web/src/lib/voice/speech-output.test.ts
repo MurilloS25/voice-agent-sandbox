@@ -475,3 +475,148 @@ describe("speaking dates", () => {
     expect(spoken).toBe(prepareTextForSpeech(text).replace(/\s+/g, " ").trim());
   });
 });
+
+// The text observed in the real acceptance session: the model wrote U+2011 (a non-breaking
+// hyphen) in the date and in the time ranges, so the ASCII-only recognisers never matched and the
+// voice read every digit.
+const OBSERVED = [
+  "Available slots for Full overhaul on 2026‑10‑08:",
+  "",
+  "- S1: 09:00‑13:00",
+  "- S2: 14:00‑18:00",
+].join("\n");
+
+describe("prepareTextForSpeech: dashes, dates and time ranges", () => {
+  it("speaks the observed reply (U+2011) as a date and as time ranges", () => {
+    expect(prepareTextForSpeech(OBSERVED)).toBe(
+      [
+        "Available slots for Full overhaul on October 8, 2026:",
+        "",
+        "- S1: from 9 AM to 1 PM",
+        "- S2: from 2 PM to 6 PM",
+      ].join("\n"),
+    );
+  });
+
+  it.each([
+    ["ASCII hyphen", "-"],
+    ["U+2010 hyphen", "‐"],
+    ["U+2011 non-breaking hyphen", "‑"],
+    ["U+2012 figure dash", "‒"],
+    ["U+2013 en dash", "–"],
+    ["U+2014 em dash", "—"],
+    ["U+2212 minus sign", "−"],
+  ])("recognises %s as the separator", (_name, dash) => {
+    expect(prepareTextForSpeech(`on 2026${dash}10${dash}08.`)).toBe(
+      "on October 8, 2026.",
+    );
+    expect(prepareTextForSpeech(`open 09:00${dash}13:00.`)).toBe(
+      "open from 9 AM to 1 PM.",
+    );
+    expect(prepareTextForSpeech(`open 09:00 ${dash} 13:00.`)).toBe(
+      "open from 9 AM to 1 PM.",
+    );
+  });
+
+  it.each([
+    ["09:00-13:00", "from 9 AM to 1 PM"],
+    ["14:00-18:00", "from 2 PM to 6 PM"],
+    ["00:00-06:00", "from midnight to 6 AM"], // 00:00 is midnight
+    ["12:00-13:00", "from noon to 1 PM"], // 12:00 is noon
+    ["00:30-12:30", "from 12:30 AM to 12:30 PM"],
+    ["18:00-00:00", "from 6 PM to midnight"],
+    ["22:00-02:00", "from 10 PM to 2 AM"], // across midnight
+    ["09:15-17:45", "from 9:15 AM to 5:45 PM"],
+    ["11:59-12:01", "from 11:59 AM to 12:01 PM"],
+    ["23:00-23:59", "from 11 PM to 11:59 PM"],
+    ["from 09:00-13:00", "from 9 AM to 1 PM"], // not "from from"
+    ["From 09:00-13:00", "from 9 AM to 1 PM"],
+    ["between 09:00-13:00", "between 9 AM and 1 PM"],
+    ["Open from 09:00‑13:00.", "Open from 9 AM to 1 PM."],
+  ])("converts the range %s to %s", (range, spoken) => {
+    expect(prepareTextForSpeech(range)).toBe(spoken);
+  });
+
+  it.each([
+    "24:00-25:00", // not a time
+    "09:60-13:00", // minutes out of range
+    "09:00-13:75",
+    "9:0-13:00", // not HH:MM
+    "2026-10-08T09:00:00Z", // a full ISO timestamp
+    "2026-10-08T09:00-05:00", // with an offset
+    "start 09:00:00-13:00:00", // seconds
+    "2026-02-30", // not a real date
+    "2026-13-01",
+    "2026‑02‑30",
+    "555-1234", // phone number
+    "+1 (555) 123-4567",
+    "v1.2.3-4",
+    "$85.00-$90.00",
+    "550e8400-e29b-41d4-a716-446655440000", // UUID
+    "v1.AAAA-BBBB.CCCC-DDDD", // a token
+    "order 12345-67890",
+    "ID 2026-10-08-12", // an identifier that merely contains a date
+    "10:00-11:00-12:00", // a chain is not one range
+    "a09:00-13:00", // inside a word
+    "9:15-17:45", // not HH:MM (single-digit hour)
+    "9:00-10:00 PM", // a 12-hour range: the AM or PM is already there
+    "09:00-10:00 pm",
+    "09:00 - 10:00 P.M.",
+    "1:30-2:30", // a duration or a score, not a clock range
+  ])("leaves %s exactly as written", (text) => {
+    expect(prepareTextForSpeech(text)).toBe(text);
+  });
+
+  it("is idempotent and does not depend on the time zone", () => {
+    const once = prepareTextForSpeech(OBSERVED);
+    expect(prepareTextForSpeech(once)).toBe(once);
+    const original = process.env.TZ;
+    try {
+      for (const zone of ["UTC", "Pacific/Kiritimati", "America/Los_Angeles"]) {
+        process.env.TZ = zone;
+        expect(prepareTextForSpeech(OBSERVED)).toBe(once);
+      }
+    } finally {
+      if (original === undefined) delete process.env.TZ;
+      else process.env.TZ = original;
+    }
+  });
+});
+
+describe("speaking the observed reply", () => {
+  it("hands the voice the natural text, before it is split into chunks", () => {
+    const { synth, out } = output();
+    expect(out.speak("a", OBSERVED)).toBe("started");
+    const spoken = synth.texts.join(" ");
+    expect(spoken).toContain("October 8, 2026");
+    expect(spoken).toContain("S1: from 9 AM to 1 PM");
+    expect(spoken).toContain("S2: from 2 PM to 6 PM");
+    expect(spoken).not.toMatch(/\d{2}:\d{2}|2026‑/);
+    expect(spoken).toBe(
+      prepareTextForSpeech(OBSERVED).replace(/\s+/g, " ").trim(),
+    );
+  });
+
+  it("changes nothing that is shown: the input string is untouched", () => {
+    const shown = `${OBSERVED}`;
+    const { out } = output();
+    out.speak("a", shown);
+    expect(shown).toBe(OBSERVED);
+    expect(shown).toContain("‑");
+  });
+
+  it("a long reply is converted before chunking, so no range is cut up", () => {
+    const { synth, out } = output();
+    const filler = "A sentence of reasonable length that goes on a little. ";
+    const text = `${filler.repeat(5)}Slots on 2026‑10‑08: 09:00‑13:00 and 14:00‑18:00. ${filler.repeat(5)}`;
+    out.speak("a", text);
+    expect(synth.spoken.length).toBeGreaterThan(1);
+    expect(synth.texts.every((chunk) => chunk.length <= MAX_CHUNK_CHARS)).toBe(
+      true,
+    );
+    const spoken = synth.texts.join(" ");
+    expect(spoken).toContain("October 8, 2026");
+    expect(spoken).toContain("from 9 AM to 1 PM");
+    expect(spoken).toContain("from 2 PM to 6 PM");
+  });
+});

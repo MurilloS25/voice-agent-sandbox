@@ -103,7 +103,7 @@ function setup(
   }
   synth = installSpeech(props.voices ?? [LOCAL]);
   resetSpeechOutput(); // the controller reads the browser (and its storage) again
-  return render(<ChatPanel initialMode={props.initialMode} />);
+  return render(<ChatPanel assumeReady initialMode={props.initialMode} />);
 }
 
 /** Start the session and let the welcome finish, so the stage is Ready. */
@@ -619,6 +619,25 @@ describe("reading replies aloud", () => {
     );
   });
 
+  it("reads the observed slots reply naturally (U+2011 dates and ranges) and shows it as written", async () => {
+    sendTurn.mockImplementation(async (p: Pending) => ({
+      kind: "ok",
+      turn: agentTurn(p.turnIndex, {
+        reply: {
+          source: "assistant",
+          text: "Slots on 2026\u201110\u201108: 09:00\u201113:00 and 14:00\u201118:00.",
+        },
+      }),
+    }));
+    setup();
+    await startSession();
+    await speakToTheAssistant("first take");
+    await screen.findByText(/Slots on 2026\u201110\u201108/);
+    expect(synth.texts.at(-1)).toBe(
+      "Slots on October 8, 2026: from 9 AM to 1 PM and from 2 PM to 6 PM.",
+    );
+  });
+
   it("never reads a system notice", async () => {
     sendTurn.mockImplementation(async (p: Pending) => ({
       kind: "ok",
@@ -774,6 +793,48 @@ describe("End voice session", () => {
     await press("Text");
     expect(screen.getByLabelText("Your message")).toHaveValue("");
     expect(screen.getByText("Answer to: first take")).toBeInTheDocument();
+  });
+});
+
+describe("a rejected booking review on the voice screen", () => {
+  it("removes Confirm booking from the stage when a later turn withdrew the review", async () => {
+    sendTurn
+      .mockImplementationOnce(async (p: Pending) => ({
+        kind: "ok",
+        turn: reviewTurn(p.turnIndex),
+      }))
+      .mockImplementationOnce(async (p: Pending) => ({
+        kind: "ok",
+        turn: agentTurn(p.turnIndex, {
+          conversation_id: p.conversationId,
+          reply: { source: "assistant", text: "Okay, dropped." },
+          events: [
+            {
+              seq: 1,
+              at: "2026-09-30T12:00:00Z",
+              kind: "booking_review_discarded",
+              actor: "tool",
+              reason: "declined",
+              service_name: "Flat repair",
+              local_date: "2026-10-01",
+              local_start: "09:00",
+            },
+          ],
+        }),
+      }));
+    setup();
+    await startSession();
+    await speakToTheAssistant("first take");
+    await screen.findByRole("button", { name: "Confirm booking" });
+    browserStartsSpeaking();
+    browserFinishesSpeaking();
+
+    await speakToTheAssistant("second take");
+    await screen.findByText(/Okay, dropped/);
+
+    expect(
+      screen.queryByRole("button", { name: "Confirm booking" }),
+    ).not.toBeInTheDocument();
   });
 });
 
@@ -1189,7 +1250,7 @@ describe("when voice is not available", () => {
       JSON.stringify({ reviewBeforeSending: true }),
     );
     resetSpeechOutput();
-    render(<ChatPanel />);
+    render(<ChatPanel assumeReady />);
     await press("Start voice assistant");
     expect(screen.getByText(/can't read replies aloud/)).toBeInTheDocument();
     await speakToTheAssistant("first take");

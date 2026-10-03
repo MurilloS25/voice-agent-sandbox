@@ -92,6 +92,7 @@
               "discriminator": {
                 "mapping": {
                   "assistant_message": "#/components/schemas/AssistantMessageEvent",
+                  "booking_review_discarded": "#/components/schemas/BookingReviewDiscardedEvent",
                   "booking_review_ready": "#/components/schemas/BookingReviewReadyEvent",
                   "guardrail": "#/components/schemas/GuardrailEvent",
                   "provider_error": "#/components/schemas/ProviderErrorEvent",
@@ -115,6 +116,9 @@
                 },
                 {
                   "$ref": "#/components/schemas/BookingReviewReadyEvent"
+                },
+                {
+                  "$ref": "#/components/schemas/BookingReviewDiscardedEvent"
                 },
                 {
                   "$ref": "#/components/schemas/AssistantMessageEvent"
@@ -401,6 +405,65 @@
           "slots"
         ],
         "title": "AvailabilityResponse",
+        "type": "object"
+      },
+      "BookingReviewDiscardedEvent": {
+        "additionalProperties": false,
+        "description": "The review waiting for the visitor was withdrawn or replaced, so it can no longer be\nconfirmed. Withdrawing books and cancels nothing: a review is only a proposal.",
+        "properties": {
+          "actor": {
+            "const": "tool",
+            "title": "Actor",
+            "type": "string"
+          },
+          "at": {
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "kind": {
+            "const": "booking_review_discarded",
+            "title": "Kind",
+            "type": "string"
+          },
+          "local_date": {
+            "title": "Local Date",
+            "type": "string"
+          },
+          "local_start": {
+            "title": "Local Start",
+            "type": "string"
+          },
+          "reason": {
+            "enum": [
+              "declined",
+              "changed_search",
+              "replaced"
+            ],
+            "title": "Reason",
+            "type": "string"
+          },
+          "seq": {
+            "description": "Position within this turn, from 1.",
+            "title": "Seq",
+            "type": "integer"
+          },
+          "service_name": {
+            "title": "Service Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "seq",
+          "at",
+          "kind",
+          "actor",
+          "reason",
+          "service_name",
+          "local_date",
+          "local_start"
+        ],
+        "title": "BookingReviewDiscardedEvent",
         "type": "object"
       },
       "BookingReviewReadyEvent": {
@@ -808,6 +871,25 @@
           "code"
         ],
         "title": "ProviderErrorEvent",
+        "type": "object"
+      },
+      "ReadinessResponse": {
+        "description": "Only a status word: no host, version, role or configuration.",
+        "properties": {
+          "status": {
+            "enum": [
+              "ready",
+              "draining",
+              "unavailable"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "ReadinessResponse",
         "type": "object"
       },
       "ServiceResponse": {
@@ -1220,6 +1302,7 @@
   "paths": {
     "/health": {
       "get": {
+        "description": "The process is up. It touches nothing: no database, no provider.",
         "operationId": "health_health_get",
         "responses": {
           "200": {
@@ -1234,6 +1317,60 @@
           }
         },
         "summary": "Health",
+        "tags": [
+          "system"
+        ]
+      }
+    },
+    "/health/live": {
+      "get": {
+        "description": "The process is up. It touches nothing: no database, no provider.",
+        "operationId": "health_health_live_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health",
+        "tags": [
+          "system"
+        ]
+      }
+    },
+    "/health/ready": {
+      "get": {
+        "description": "Ready to serve: not shutting down and, with PostgreSQL, the database answers a minimal\nquery. A status word only; never a host, a role, a version or a setting.",
+        "operationId": "health_ready_health_ready_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadinessResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadinessResponse"
+                }
+              }
+            },
+            "description": "Not ready, or draining."
+          }
+        },
+        "summary": "Health Ready",
         "tags": [
           "system"
         ]
@@ -1338,7 +1475,7 @@
                 }
               }
             },
-            "description": "agent_unavailable: no provider is configured."
+            "description": "agent_unavailable (no provider is configured), demo_budget_reached (today's allowance is used up), budget_unavailable (the budget could not be checked) or service_draining (the process is shutting down). The provider was not called."
           }
         },
         "summary": "Create Agent Turn",
@@ -1462,7 +1599,7 @@
                 }
               }
             },
-            "description": "slot_unavailable (just taken) or proposal_stale (details changed)."
+            "description": "slot_unavailable (just taken), proposal_stale (details changed) or proposal_discarded (the visitor withdrew this review: nothing is booked)."
           },
           "422": {
             "content": {
@@ -1743,7 +1880,7 @@
               }
             }
           },
-          "description": "The raw audio bytes of one short recording (at most 512 KB).",
+          "description": "The raw audio bytes of one short recording (at most 256 KB).",
           "required": true
         },
         "responses": {
@@ -1765,7 +1902,7 @@
                 }
               }
             },
-            "description": "audio_too_large: more than 512 KB."
+            "description": "audio_too_large: more than 256 KB."
           },
           "415": {
             "content": {
@@ -1823,7 +1960,7 @@
                 }
               }
             },
-            "description": "speech_unavailable: no provider is configured."
+            "description": "speech_unavailable (no provider is configured), demo_budget_reached, budget_unavailable or service_draining. The provider was not called."
           },
           "504": {
             "content": {

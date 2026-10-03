@@ -22,6 +22,7 @@ from langchain_core.messages import AIMessage, AnyMessage, HumanMessage
 
 from voice_agent_api.agent.bounded import BoundedCaller, CallTimedOut, Deadline, DeadlineExceeded
 from voice_agent_api.agent.contracts import AgentReply, AgentTurnRequest, AgentTurnResponse
+from voice_agent_api.agent.discards import DiscardedProposals
 from voice_agent_api.agent.errors import AgentBusy
 from voice_agent_api.agent.events import EventLog
 from voice_agent_api.agent.graph import GraphDeps, build_graph
@@ -35,6 +36,7 @@ from voice_agent_api.agent.state import (
 )
 from voice_agent_api.agent.store import Accepted, Cached, ConversationStore
 from voice_agent_api.agent.tools import ToolExecutor, read_prompt_facts
+from voice_agent_api.budget.guard import BudgetGuard, Reservation
 from voice_agent_api.domain.errors import StorageUnavailable
 from voice_agent_api.domain.models import Proposal
 from voice_agent_api.domain.ports import AppointmentBook, BusinessCatalog
@@ -79,7 +81,13 @@ class AgentService:
         limits: AgentLimits | None = None,
         caller: BoundedCaller | None = None,
         monotonic: Callable[[], float] = time.monotonic,
+        budget: BudgetGuard | None = None,
+        discards: DiscardedProposals | None = None,
     ) -> None:
+        self._budget = budget
+        # Withdrawn reviews, remembered so their tokens can no longer be confirmed. Shared with the
+        # confirmation route through `discards`.
+        self.discards = discards if discards is not None else DiscardedProposals()
         self._limits = limits or AgentLimits()
         self._store = store
         self._model = model
@@ -98,6 +106,9 @@ class AgentService:
 
     def close(self) -> None:
         self._caller.close()
+        clear = getattr(self._store, "clear", None)
+        if callable(clear):
+            clear()  # nothing a visitor said outlives the process
 
     def handle_turn(self, request: AgentTurnRequest) -> AgentTurnResponse:
         decision = self._store.begin_turn(request)
@@ -108,8 +119,19 @@ class AgentService:
             raise AgentBusy
         committed = False
         try:
+            # Money first: the day's allowance is reserved before anything costly happens. A
+            # refusal (or a budget that cannot be checked) is raised here, the turn is released
+            # below and nothing was spent.
+            reservation = self._budget.reserve_agent_turn() if self._budget is not None else None
             started = self._monotonic()
             response, update, stats = self._run_turn(request, decision)
+            if self._budget is not None and reservation is not None:
+                self._settle(reservation, stats, completed=response.outcome == "completed")
+            if update.discarded_proposal is not None:
+                # Remembered before the commit, so there is no instant in which the withdrawn
+                # token can still be confirmed. If the commit then fails the visitor's retry
+                # decides the same way, and a 409 on a review the model withdrew is the safe side.
+                self.discards.add(update.discarded_proposal)
             committed = self._store.commit_turn(
                 decision.conversation_id, decision.turn_token, response, update
             )
@@ -132,6 +154,19 @@ class AgentService:
                 self._store.abort_turn(decision.conversation_id, decision.turn_token)
             self._gate.release()
 
+    def _settle(self, reservation: Reservation, stats: "_Stats", *, completed: bool) -> None:
+        if self._budget is None:
+            return
+        if stats.provider_untouched:
+            self._budget.refund(reservation)  # the model was never contacted
+            return
+        used = stats.input_tokens + stats.output_tokens
+        # A turn that did not complete may have called the model again after the usage we saw
+        # (a timeout or an error): then the reservation is never lowered, only raised.
+        if used > 0 and (completed or used > reservation.amount):
+            self._budget.settle(reservation, used)
+        # No usage reported: the provider may have counted the call, so the reservation stays.
+
     # -----------------------------------------------------------------------------------------
 
     def _run_turn(
@@ -140,7 +175,9 @@ class AgentService:
         events = EventLog(self._clock)
         events.user_message(request.message)
         workspace = TurnWorkspace(
-            reviewable=accepted.snapshot.offered, offered=accepted.snapshot.offered
+            reviewable=accepted.snapshot.offered,
+            offered=accepted.snapshot.offered,
+            prior_review=accepted.snapshot.pending_review,
         )
         stats = _Stats()
         limits = self._limits
@@ -159,13 +196,16 @@ class AgentService:
         except DeadlineExceeded:
             events.turn_error("turn_deadline_exceeded")
             degraded = "turn_deadline_exceeded"
+            stats.provider_untouched = True
         except (StorageUnavailable, CallTimedOut):
             events.turn_error("storage_unavailable")
             degraded = "storage_unavailable"
+            stats.provider_untouched = True
         except Exception as exc:
             logger.warning("agent_turn_error stage=prompt error=%s", type(exc).__name__)
             events.turn_error("internal_error")
             degraded = "internal_error"
+            stats.provider_untouched = True
         else:
             snapshot = accepted.snapshot
             try:
@@ -252,6 +292,12 @@ class AgentService:
             if workspace.offered_changed and reply.source == "assistant"
             else None,
             pending_review=review.pending if review is not None else None,
+            # Whatever the reply, a withdrawn or replaced review stays withdrawn.
+            discarded_proposal=(
+                workspace.prior_review.proposal_id
+                if workspace.discard_reason is not None and workspace.prior_review is not None
+                else None
+            ),
         )
         return response, update
 
@@ -279,3 +325,5 @@ class _Stats:
         self.tool_calls = 0
         self.input_tokens = 0
         self.output_tokens = 0
+        # True when the turn ended before any model call could have been made.
+        self.provider_untouched = False

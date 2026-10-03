@@ -13,6 +13,7 @@ import {
 import type { Turn } from "@/app/assistant/state";
 import { MAX_MESSAGE_LENGTH } from "@/lib/agent-message";
 import { MAX_RECORDING_MS } from "@/lib/voice/limits";
+import type { Readiness } from "@/lib/readiness";
 import { stageCopy, type StageKind } from "@/lib/voice/stage";
 import { formatClock, useVoiceCapture } from "@/lib/voice/use-voice-capture";
 import { deniedCopy, problemCopy, VOICE_WORDING } from "@/lib/voice/voice-copy";
@@ -64,6 +65,9 @@ type VoiceStageProps = {
   onSwitchToText: () => void;
   /** Placed after the stage, for example the voice settings link. */
   footer?: ReactNode;
+  /** Whether the backend can serve. Until it can, nothing is recorded, sent or started. */
+  readiness: Readiness;
+  onRetryReadiness: () => void;
   /** What is heard is sent without a review (the default). */
   autoSend: boolean;
   /**
@@ -103,6 +107,8 @@ export function VoiceStage({
   review,
   onSwitchToText,
   footer,
+  readiness,
+  onRetryReadiness,
   autoSend,
   exchangeHidden,
 }: VoiceStageProps) {
@@ -123,8 +129,10 @@ export function VoiceStage({
   const captureProblem =
     capture.state.kind === "denied" || capture.state.kind === "error";
 
+  const gated = readiness !== "ready";
   let stage: StageKind;
-  if (!sessionActive) stage = "start";
+  if (gated) stage = readiness === "unreachable" ? "error" : "starting";
+  else if (!sessionActive) stage = "start";
   else if (busy === "thinking") stage = "thinking";
   else if (busy === "speaking") stage = "speaking";
   else if (capture.state.kind === "requesting_permission") stage = "preparing";
@@ -158,10 +166,22 @@ export function VoiceStage({
     previousStage.current = stage;
   }, [stage]);
 
-  const copy = stageCopy(stage, autoSend);
+  const copy = gated
+    ? readiness === "unreachable"
+      ? {
+          label: "The assistant isn't responding",
+          hint: "It did not wake up in time. Nothing was sent. You can try again.",
+          action: "Retry",
+        }
+      : stageCopy("starting", autoSend)
+    : stageCopy(stage, autoSend);
   const unsupported = hydrated && !capture.supported;
 
   function primary() {
+    if (gated) {
+      if (readiness === "unreachable") onRetryReadiness();
+      return; // while it wakes up there is nothing to press
+    }
     switch (stage) {
       case "start":
         onStart();
@@ -229,7 +249,8 @@ export function VoiceStage({
     );
   }
 
-  const actionDisabled = stage === "thinking";
+  const actionDisabled =
+    stage === "thinking" || (gated && readiness !== "unreachable");
   const showOrbButton = stage !== "review";
 
   return (

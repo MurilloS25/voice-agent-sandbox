@@ -11,8 +11,52 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Health */
+    /**
+     * Health
+     * @description The process is up. It touches nothing: no database, no provider.
+     */
     get: operations["health_health_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/health/live": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Health
+     * @description The process is up. It touches nothing: no database, no provider.
+     */
+    get: operations["health_health_live_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/health/ready": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Health Ready
+     * @description Ready to serve: not shutting down and, with PostgreSQL, the database answers a minimal
+     *     query. A status word only; never a host, a role, a version or a setting.
+     */
+    get: operations["health_ready_health_ready_get"];
     put?: never;
     post?: never;
     delete?: never;
@@ -233,6 +277,7 @@ export interface components {
         | components["schemas"]["ToolRequestedEvent"]
         | components["schemas"]["ToolResultEvent"]
         | components["schemas"]["BookingReviewReadyEvent"]
+        | components["schemas"]["BookingReviewDiscardedEvent"]
         | components["schemas"]["AssistantMessageEvent"]
         | components["schemas"]["SystemMessageEvent"]
         | components["schemas"]["GuardrailEvent"]
@@ -389,6 +434,44 @@ export interface components {
       slots: components["schemas"]["SlotResponse"][];
       /** Timezone */
       timezone: string;
+    };
+    /**
+     * BookingReviewDiscardedEvent
+     * @description The review waiting for the visitor was withdrawn or replaced, so it can no longer be
+     *     confirmed. Withdrawing books and cancels nothing: a review is only a proposal.
+     */
+    BookingReviewDiscardedEvent: {
+      /**
+       * Actor
+       * @constant
+       */
+      actor: "tool";
+      /**
+       * At
+       * Format: date-time
+       */
+      at: string;
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "booking_review_discarded";
+      /** Local Date */
+      local_date: string;
+      /** Local Start */
+      local_start: string;
+      /**
+       * Reason
+       * @enum {string}
+       */
+      reason: "declined" | "changed_search" | "replaced";
+      /**
+       * Seq
+       * @description Position within this turn, from 1.
+       */
+      seq: number;
+      /** Service Name */
+      service_name: string;
     };
     /** BookingReviewReadyEvent */
     BookingReviewReadyEvent: {
@@ -608,6 +691,17 @@ export interface components {
        * @description Position within this turn, from 1.
        */
       seq: number;
+    };
+    /**
+     * ReadinessResponse
+     * @description Only a status word: no host, version, role or configuration.
+     */
+    ReadinessResponse: {
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: "ready" | "draining" | "unavailable";
     };
     /** ServiceResponse */
     ServiceResponse: {
@@ -842,6 +936,55 @@ export interface operations {
       };
     };
   };
+  health_health_live_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HealthResponse"];
+        };
+      };
+    };
+  };
+  health_ready_health_ready_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ReadinessResponse"];
+        };
+      };
+      /** @description Not ready, or draining. */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ReadinessResponse"];
+        };
+      };
+    };
+  };
   create_agent_turn_v1_agent_turns_post: {
     parameters: {
       query?: never;
@@ -913,7 +1056,7 @@ export interface operations {
           "application/json": components["schemas"]["ErrorResponse"];
         };
       };
-      /** @description agent_unavailable: no provider is configured. */
+      /** @description agent_unavailable (no provider is configured), demo_budget_reached (today's allowance is used up), budget_unavailable (the budget could not be checked) or service_draining (the process is shutting down). The provider was not called. */
       503: {
         headers: {
           [name: string]: unknown;
@@ -1015,7 +1158,7 @@ export interface operations {
           "application/json": components["schemas"]["AppointmentResponse"];
         };
       };
-      /** @description slot_unavailable (just taken) or proposal_stale (details changed). */
+      /** @description slot_unavailable (just taken), proposal_stale (details changed) or proposal_discarded (the visitor withdrew this review: nothing is booked). */
       409: {
         headers: {
           [name: string]: unknown;
@@ -1213,7 +1356,7 @@ export interface operations {
       path?: never;
       cookie?: never;
     };
-    /** @description The raw audio bytes of one short recording (at most 512 KB). */
+    /** @description The raw audio bytes of one short recording (at most 256 KB). */
     requestBody: {
       content: {
         "audio/mp4": string;
@@ -1232,7 +1375,7 @@ export interface operations {
           "application/json": components["schemas"]["TranscriptionResponse"];
         };
       };
-      /** @description audio_too_large: more than 512 KB. */
+      /** @description audio_too_large: more than 256 KB. */
       413: {
         headers: {
           [name: string]: unknown;
@@ -1279,7 +1422,7 @@ export interface operations {
           "application/json": components["schemas"]["ErrorResponse"];
         };
       };
-      /** @description speech_unavailable: no provider is configured. */
+      /** @description speech_unavailable (no provider is configured), demo_budget_reached, budget_unavailable or service_draining. The provider was not called. */
       503: {
         headers: {
           [name: string]: unknown;

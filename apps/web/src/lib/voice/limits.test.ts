@@ -12,7 +12,7 @@ describe("voice limits", () => {
   it("match the plan", () => {
     expect(MAX_RECORDING_MS).toBe(15_000);
     expect(MIN_RECORDING_MS).toBe(300);
-    expect(MAX_AUDIO_BYTES).toBe(512 * 1024);
+    expect(MAX_AUDIO_BYTES).toBe(256 * 1024);
     expect([...ALLOWED_AUDIO_TYPES]).toEqual([
       "audio/webm",
       "audio/ogg",

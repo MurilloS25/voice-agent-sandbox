@@ -76,7 +76,7 @@ describe("transcribeClip", () => {
       code: "invalid",
     });
     expect(
-      await transcribeClip(clip("audio/webm", 512 * 1024 + 1), signal),
+      await transcribeClip(clip("audio/webm", 256 * 1024 + 1), signal),
     ).toEqual({ kind: "error", code: "too_large" });
     expect(fetchMock).not.toHaveBeenCalled();
   });

@@ -1,0 +1,2 @@
+# The CA certificate is hashed and copied byte for byte: never convert its line endings.
+apps/api/certs/*.crt -text

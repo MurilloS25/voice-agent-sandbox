@@ -60,7 +60,7 @@ afterEach(() => {
 
 describe("the welcome", () => {
   it("is the assistant's first message, says it is an AI, and has the agreed words", () => {
-    render(<ChatPanel initialMode="text" />);
+    render(<ChatPanel assumeReady initialMode="text" />);
     const welcome = screen.getByLabelText("Welcome from the assistant");
     expect(within(welcome).getByText("Assistant (AI)")).toBeInTheDocument();
     expect(within(welcome).getByText(WELCOME_TEXT)).toBeInTheDocument();
@@ -70,14 +70,14 @@ describe("the welcome", () => {
   });
 
   it("costs nothing: no call, no conversation id, no announcement", () => {
-    render(<ChatPanel initialMode="text" />);
+    render(<ChatPanel assumeReady initialMode="text" />);
     expect(sendTurn).not.toHaveBeenCalled();
     expect(uuid.calls).toBe(0);
     expect(screen.getByRole("status", { name: "" })).toBeEmptyDOMElement();
   });
 
   it("is never sent: the first send is turn 1 and carries only the visitor's words", async () => {
-    render(<ChatPanel initialMode="text" />);
+    render(<ChatPanel assumeReady initialMode="text" />);
     type("hello");
     await press("Send message");
     expect(submissions()).toHaveLength(1);
@@ -91,7 +91,7 @@ describe("the welcome", () => {
   it("is never read aloud by the text view and has no Listen button", () => {
     const synth = installSpeech([fakeVoice({ name: "L", localService: true })]);
     resetSpeechOutput();
-    render(<ChatPanel initialMode="text" />);
+    render(<ChatPanel assumeReady initialMode="text" />);
     expect(synth.spoken).toHaveLength(0);
     expect(
       within(screen.getByLabelText("Welcome from the assistant")).queryByRole(
@@ -104,7 +104,7 @@ describe("the welcome", () => {
   });
 
   it("only fills the message box from a quick start; the visitor sends it", async () => {
-    render(<ChatPanel initialMode="text" />);
+    render(<ChatPanel assumeReady initialMode="text" />);
     fireEvent.click(
       screen.getByRole("button", { name: "Find an afternoon appointment" }),
     );
@@ -117,7 +117,7 @@ describe("the welcome", () => {
   });
 
   it("hides the quick starts once the conversation begins but keeps the greeting", async () => {
-    render(<ChatPanel initialMode="text" />);
+    render(<ChatPanel assumeReady initialMode="text" />);
     type("hello");
     await press("Send message");
     expect(
@@ -144,7 +144,7 @@ describe("a draft from a link", () => {
   });
 
   it("prepares the draft when the chat is already open and the box is empty, and focuses it", () => {
-    const { rerender } = render(<ChatPanel initialMode="text" />);
+    const { rerender } = render(<ChatPanel assumeReady initialMode="text" />);
     expect(box()).not.toHaveFocus();
     rerender(
       <ChatPanel
@@ -159,14 +159,16 @@ describe("a draft from a link", () => {
   });
 
   it("treats a box with only spaces as empty for a context that arrives later", () => {
-    const { rerender } = render(<ChatPanel initialMode="text" />);
+    const { rerender } = render(<ChatPanel assumeReady initialMode="text" />);
     type("   ");
-    rerender(<ChatPanel initialMode="text" initialDraft="Later context" />);
+    rerender(
+      <ChatPanel assumeReady initialMode="text" initialDraft="Later context" />,
+    );
     expect(box()).toHaveValue("Later context");
   });
 
   it("keeps text the visitor wrote when a context arrives: no change, no concatenation, no send", () => {
-    const { rerender } = render(<ChatPanel initialMode="text" />);
+    const { rerender } = render(<ChatPanel assumeReady initialMode="text" />);
     type("Typed by the visitor");
     rerender(
       <ChatPanel
@@ -179,46 +181,70 @@ describe("a draft from a link", () => {
   });
 
   it("does not bring an old context back when the box is cleared afterwards", () => {
-    const { rerender } = render(<ChatPanel initialMode="text" />);
+    const { rerender } = render(<ChatPanel assumeReady initialMode="text" />);
     type("Typed by the visitor");
-    rerender(<ChatPanel initialMode="text" initialDraft="Ignored context" />); // ignored
+    rerender(
+      <ChatPanel
+        assumeReady
+        initialMode="text"
+        initialDraft="Ignored context"
+      />,
+    ); // ignored
     type("");
     expect(box()).toHaveValue("");
-    rerender(<ChatPanel initialMode="text" initialDraft="Ignored context" />); // same context, same page
+    rerender(
+      <ChatPanel
+        assumeReady
+        initialMode="text"
+        initialDraft="Ignored context"
+      />,
+    ); // same context, same page
     expect(box()).toHaveValue("");
 
-    rerender(<ChatPanel initialMode="text" initialDraft="Applied later" />); // a new one, box empty: applies
+    rerender(
+      <ChatPanel assumeReady initialMode="text" initialDraft="Applied later" />,
+    ); // a new one, box empty: applies
     expect(box()).toHaveValue("Applied later");
     type("");
-    rerender(<ChatPanel initialMode="text" initialDraft="Applied later" />);
+    rerender(
+      <ChatPanel assumeReady initialMode="text" initialDraft="Applied later" />,
+    );
     expect(box()).toHaveValue("");
     expect(sendTurn).not.toHaveBeenCalled();
   });
 
   it("applies a different valid context later, only while the box is empty", () => {
     const { rerender } = render(
-      <ChatPanel initialMode="text" initialDraft="First context" />,
+      <ChatPanel assumeReady initialMode="text" initialDraft="First context" />,
     );
     expect(box()).toHaveValue("First context");
     type("");
-    rerender(<ChatPanel initialMode="text" initialDraft="Second context" />);
+    rerender(
+      <ChatPanel
+        assumeReady
+        initialMode="text"
+        initialDraft="Second context"
+      />,
+    );
     expect(box()).toHaveValue("Second context");
-    rerender(<ChatPanel initialMode="text" initialDraft="Third context" />); // box has text now
+    rerender(
+      <ChatPanel assumeReady initialMode="text" initialDraft="Third context" />,
+    ); // box has text now
     expect(box()).toHaveValue("Second context");
     expect(sendTurn).not.toHaveBeenCalled();
   });
 
   it("produces no draft when the context is invalid (an empty draft)", () => {
     const { rerender } = render(
-      <ChatPanel initialMode="text" initialDraft="First context" />,
+      <ChatPanel assumeReady initialMode="text" initialDraft="First context" />,
     );
     type("");
-    rerender(<ChatPanel initialMode="text" initialDraft="" />);
+    rerender(<ChatPanel assumeReady initialMode="text" initialDraft="" />);
     expect(box()).toHaveValue("");
   });
 
   it("keeps the conversation when a context arrives", async () => {
-    const { rerender } = render(<ChatPanel initialMode="text" />);
+    const { rerender } = render(<ChatPanel assumeReady initialMode="text" />);
     type("hello");
     await press("Send message");
     expect(await screen.findByText("Answer to: hello")).toBeInTheDocument();
@@ -252,7 +278,7 @@ describe("a draft from a link", () => {
 
 describe("quick starts and text the visitor wrote", () => {
   it("are disabled, with a visible note, while the box has text, and the text is kept", () => {
-    render(<ChatPanel initialMode="text" />);
+    render(<ChatPanel assumeReady initialMode="text" />);
     type("My own question");
     for (const action of QUICK_ACTIONS) {
       const button = screen.getByRole("button", { name: action.label });
@@ -267,7 +293,7 @@ describe("quick starts and text the visitor wrote", () => {
   });
 
   it("work again once the box is cleared, and then fill it without sending", () => {
-    render(<ChatPanel initialMode="text" />);
+    render(<ChatPanel assumeReady initialMode="text" />);
     type("My own question");
     type("");
     const button = screen.getByRole("button", { name: QUICK_ACTIONS[0].label });
@@ -279,7 +305,7 @@ describe("quick starts and text the visitor wrote", () => {
   });
 
   it("treat a box with only spaces as empty", () => {
-    render(<ChatPanel initialMode="text" />);
+    render(<ChatPanel assumeReady initialMode="text" />);
     type("   ");
     expect(
       screen.getByRole("button", { name: QUICK_ACTIONS[1].label }),
@@ -291,7 +317,7 @@ describe("Review again goes back to the assistant", () => {
   it("links an expired review to /assistant with the service and the local day", async () => {
     confirmBooking.mockResolvedValueOnce({ kind: "expired" });
     sendTurn.mockResolvedValueOnce({ kind: "ok", turn: reviewTurn(1) });
-    render(<ChatPanel initialMode="text" />);
+    render(<ChatPanel assumeReady initialMode="text" />);
     type("the first one");
     await press("Send message");
     await press("Confirm booking");
@@ -307,7 +333,7 @@ describe("Review again goes back to the assistant", () => {
 describe("the assistant is not switched on", () => {
   it("Try again sends the kept message once more; there is no manual form", async () => {
     sendTurn.mockResolvedValueOnce({ kind: "agent_unavailable" });
-    render(<ChatPanel initialMode="text" />);
+    render(<ChatPanel assumeReady initialMode="text" />);
     type("hello");
     await press("Send message");
     expect(
@@ -361,7 +387,7 @@ describe("a transcript waits for the visitor", () => {
   }
 
   it("offers Send transcript and Record again, and sends nothing by itself", async () => {
-    render(<ChatPanel initialMode="text" />);
+    render(<ChatPanel assumeReady initialMode="text" />);
     await record("Speak");
     await vi.waitFor(() => expect(box().value).toBe("first take"));
 
@@ -377,7 +403,7 @@ describe("a transcript waits for the visitor", () => {
   });
 
   it("Record again replaces a transcript that was left as it was", async () => {
-    render(<ChatPanel initialMode="text" />);
+    render(<ChatPanel assumeReady initialMode="text" />);
     await record("Speak");
     await vi.waitFor(() => expect(box().value).toBe("first take"));
     await record("Record again");
@@ -386,7 +412,7 @@ describe("a transcript waits for the visitor", () => {
   });
 
   it("Record again keeps what the visitor typed before the transcript", async () => {
-    render(<ChatPanel initialMode="text" />);
+    render(<ChatPanel assumeReady initialMode="text" />);
     type("Hello,");
     await record("Speak");
     await vi.waitFor(() => expect(box().value).toBe("Hello, first take"));
@@ -395,7 +421,7 @@ describe("a transcript waits for the visitor", () => {
   });
 
   it("Send transcript sends the checked text once; the button is Send message again after", async () => {
-    render(<ChatPanel initialMode="text" />);
+    render(<ChatPanel assumeReady initialMode="text" />);
     await record("Speak");
     await vi.waitFor(() => expect(box().value).toBe("first take"));
     await press("Send transcript");
@@ -407,7 +433,7 @@ describe("a transcript waits for the visitor", () => {
   });
 
   it("still sends from the keyboard with Enter", async () => {
-    render(<ChatPanel initialMode="text" />);
+    render(<ChatPanel assumeReady initialMode="text" />);
     await record("Speak");
     await vi.waitFor(() => expect(box().value).toBe("first take"));
     await act(async () => {
@@ -433,7 +459,7 @@ describe("Record again that does not produce a transcript", () => {
         }),
       );
     });
-    render(<ChatPanel initialMode="text" />);
+    render(<ChatPanel assumeReady initialMode="text" />);
     await press("Speak");
     await screen.findByRole("button", { name: "Stop" });
     await act(async () => {

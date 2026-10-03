@@ -6,8 +6,12 @@
  */
 export const MAX_RECORDING_MS = 15_000;
 export const MIN_RECORDING_MS = 300;
-/** The API's limit (512 KB). Checked in the browser, in the route handler and in the API. */
-export const MAX_AUDIO_BYTES = 512 * 1024;
+/**
+ * The API's default limit (256 KB: 15 s of the browsers' own encodings with headroom). Checked in
+ * the browser, in the route handler and in the API; `tests/speech/test_budget.py` in the API pins
+ * the two sides together.
+ */
+export const MAX_AUDIO_BYTES = 256 * 1024;
 /** How long to wait for the visitor to answer the browser's microphone prompt. */
 export const PERMISSION_TIMEOUT_MS = 20_000;
 
@@ -39,7 +43,8 @@ export type VoiceErrorCode =
   | "failed"
   | "timeout"
   | "unreachable"
-  | "forbidden";
+  | "forbidden"
+  | "limit_reached"; // the demo's daily allowance for voice input is spent
 
 export const VOICE_ERROR_CODES: readonly VoiceErrorCode[] = [
   "feature_off",
@@ -52,4 +57,5 @@ export const VOICE_ERROR_CODES: readonly VoiceErrorCode[] = [
   "timeout",
   "unreachable",
   "forbidden",
+  "limit_reached",
 ];

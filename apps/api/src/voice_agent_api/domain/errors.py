@@ -47,6 +47,13 @@ class ProposalExpired(DomainError):
         super().__init__("The booking review expired. Review it again.")
 
 
+class ProposalDiscarded(DomainError):
+    """The visitor withdrew this review, or a newer one replaced it. Nothing was written."""
+
+    def __init__(self) -> None:
+        super().__init__("This booking review was discarded. Nothing was booked.")
+
+
 class ProposalStale(DomainError):
     """The reviewed catalog values no longer match the current catalog. Nothing was written."""
 

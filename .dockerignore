@@ -1,0 +1,26 @@
+# The API image needs only apps/api/{pyproject.toml,uv.lock,README.md,src,certs}.
+.git
+.github
+.claude
+.env
+.env.*
+**/.env
+**/.env.*
+**/node_modules
+**/.next
+**/__pycache__
+**/*.pyc
+**/.venv
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+apps/web
+apps/api/tests
+apps/api/supabase
+apps/api/.env*
+docs
+evals
+packages
+*.md
+!apps/api/README.md
+!apps/api/certs/README.md

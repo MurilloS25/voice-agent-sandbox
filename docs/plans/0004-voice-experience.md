@@ -1,5 +1,7 @@
 # Plan 0004 — Voice experience
 
+> **Update (plan 0007, 2026-10):** the server's audio limit is now **256 KB** (the 512 KB figures below are the original values) and rate limits and a daily budget now exist; see plan 0007.
+
 Status: completed. Phases 4A to 4E and the live checkpoints C1 to C3 are done (2026-10-01); C4 (push and pull request) is the closing step: the pull request is opened from this branch and is not merged by this milestone's work. The real Groq services were exercised only at C2 and C3 with synthetic audio; a real microphone and real speech synthesis voices were not. The branch is `feature/voice-experience`, created from `5b08ef0` (a squash commit with a single parent, `253fb59`; PR #2 is merged). Research sources were consulted on 2026-10-01 and are listed at the end.
 
 # Outcome

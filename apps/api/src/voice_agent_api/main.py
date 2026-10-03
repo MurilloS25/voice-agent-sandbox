@@ -5,15 +5,10 @@ logging. Library code and tests import `voice_agent_api.factory` instead, which 
 import-time side effects.
 """
 
-import logging
-
 from voice_agent_api.config import load_settings
 from voice_agent_api.factory import create_app_from_settings
+from voice_agent_api.logging_setup import configure_logging
 
-# Without this, the app's INFO audit lines (outcome codes and route templates only: never an
-# identifier, a token or a submitted value) would be dropped. Only this entrypoint configures
-# logging.
-logging.basicConfig(format="%(levelname)s %(name)s: %(message)s")
-logging.getLogger("voice_agent_api").setLevel(logging.INFO)
+configure_logging()
 
 app = create_app_from_settings(load_settings())

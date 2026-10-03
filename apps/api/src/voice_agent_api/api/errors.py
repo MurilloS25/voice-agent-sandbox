@@ -21,10 +21,12 @@ from voice_agent_api.agent.errors import (
     TurnOutOfOrder,
 )
 from voice_agent_api.api.schemas import ErrorBody, ErrorFieldDetail, ErrorResponse
+from voice_agent_api.budget.errors import BudgetExhausted, BudgetUnavailable
 from voice_agent_api.domain.errors import (
     AppointmentNotFound,
     DateOutsideBookingWindow,
     DomainError,
+    ProposalDiscarded,
     ProposalExpired,
     ProposalInvalid,
     ProposalStale,
@@ -75,6 +77,7 @@ _DOMAIN_ERRORS: dict[type[DomainError], tuple[int, str]] = {
     SlotNotOffered: (422, "slot_not_offered"),
     SlotUnavailable: (409, "slot_unavailable"),
     ProposalInvalid: (422, "proposal_invalid"),
+    ProposalDiscarded: (409, "proposal_discarded"),
     ProposalExpired: (422, "proposal_expired"),
     ProposalStale: (409, "proposal_stale"),
     AppointmentNotFound: (404, "appointment_not_found"),
@@ -87,6 +90,8 @@ _DOMAIN_ERRORS: dict[type[DomainError], tuple[int, str]] = {
     TurnOutOfOrder: (409, "turn_out_of_order"),
     ConversationLimitReached: (409, "conversation_limit_reached"),
     AgentBusy: (429, "agent_busy"),
+    BudgetExhausted: (503, "demo_budget_reached"),
+    BudgetUnavailable: (503, "budget_unavailable"),
     AudioTooLarge: (413, "audio_too_large"),
     AudioUnsupported: (415, "audio_unsupported"),
     AudioInvalid: (422, "audio_invalid"),
@@ -148,7 +153,16 @@ async def _unhandled(request: Request, exc: Exception) -> JSONResponse:
     # Log the traceback server-side; the client only ever sees a generic message. The route
     # template is logged, never the concrete path, which can carry an appointment id.
     route = getattr(request.scope.get("route"), "path", "-")
-    logger.error("Unhandled error on %s %s", request.method, route, exc_info=exc)
+    # Class name only: an exception's text can carry a driver's key values or a provider's
+    # payload. A traceback is logged only when explicitly enabled (development and tests).
+    verbose = bool(getattr(request.app.state, "log_tracebacks", False))
+    logger.error(
+        "Unhandled error on %s %s error=%s",
+        request.method,
+        route,
+        type(exc).__name__,
+        exc_info=exc if verbose else None,
+    )
     return _envelope(500, ErrorBody(code="internal_error", message="Something went wrong."))
 
 
