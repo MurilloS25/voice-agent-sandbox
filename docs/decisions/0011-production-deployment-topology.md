@@ -1,6 +1,6 @@
 # Deployment topology: Vercel web, a single FastAPI service on Render Free, Supabase and Groq
 
-- Status: **accepted** (owner approved G0 with decisions D1 to D9 on 2026-10-02). Gates G1 to G3 are implemented and verified locally; nothing is deployed yet. Prices and limits are as the official pages stated them on 2026-10-02.
+- Status: **accepted** (owner approved G0 with decisions D1 to D9 on 2026-10-02). The topology is deployed and running from `main` (2026-10-03): Vercel Hobby (public production, protected previews), Render Free, Supabase Free and Groq Free. Prices and limits are as the official pages stated them on 2026-10-02.
 - Date: 2026-10-02
 
 ## Context

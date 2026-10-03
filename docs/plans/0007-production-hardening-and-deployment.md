@@ -1,6 +1,6 @@
 # Plan 0007 — Production hardening and deployment
 
-Status: **implementation complete and reviewed; migration applied; deployment pending** (G0 approved 2026-10-02; G1 to G3 done; G5 migration and CA done; G6 onward pending the owner). Originally written as phase 5A, research and plan only. Branch `feature/production-hardening-deployment`, created from `3dad109` (PR #5 squash on `main`). Nothing in this plan has been implemented or deployed, and no external service, account, key or database was touched while writing it: it rests on the repository and on official documentation read on **2026-10-02**. The approved publication is entirely on free tiers (see the decision below).
+Status: **completed** (2026-10-03: hardened, deployed from `main` and accepted in production; see the final section). Originally written as phase 5A, research and plan only. Branch `feature/production-hardening-deployment`, created from `3dad109` (PR #5 squash on `main`). The research sections below were written before any implementation or deployment, without touching any external service, and rest on the repository and on official documentation read on **2026-10-02**; the implementation, the acceptance and the launch are recorded in the sections at the end. The approved publication is entirely on free tiers (see the decision below).
 
 # Outcome
 
@@ -318,3 +318,9 @@ A manual check by the owner (not automated, and nothing was recorded: no audio, 
 - After a wrong date was given and another search was made, the earlier booking review became "no longer active" and lost its Confirm booking button; the new review was the only actionable one.
 
 Not part of this acceptance: the Vercel production deployment from `main` and the switch of Vercel's protection from All Deployments to Standard Protection, which come after the merge and are validated separately.
+
+# Production launch (2026-10-03)
+
+The pull request that carried this plan was merged into `main` (squash). Render (Free) and Vercel (Hobby) were then promoted from `main`, Vercel's production became public while previews stay protected, and the public production deployment was validated by the owner with the same manual check as before (real microphone, speech-to-text, agent and speech synthesis); nothing automated and no visitor content was recorded. The public address is in the README. No defect that blocks use is known.
+
+Known limits that remain, by design of the free-tier topology: the first visit after a quiet period waits about a minute for Render to wake; conversations live in one process's memory and are lost on a restart; a withdrawn booking review is remembered per process; the Content-Security-Policy is Report-Only (enforcing it needs a clean browser run first); and the free tiers' daily and monthly limits apply, so the demo may pause (the service has its own daily budget and rate limits, and no availability is promised).
